@@ -7,8 +7,7 @@
 ## In Progress
 
 ## Pending
-- [ ] `checks/nbt_check.py` — NBT readability check (port from MoogsBountifulStructures)
-- [ ] `checks/check_data_integrity.py` — pool→NBT→worldgen→structure_set chain (port)
+- [ ] `utils/paths.py` — disk-detecting path resolver + MC 1.21 rename map; patch nbt_check + check_data_integrity to use it
 - [ ] `checks/check_loot_tables.py` — loot table refs in NBT files (port)
 - [ ] `checks/check_loot_table_schemas.py` — loot table JSON vs MC schema (port)
 - [ ] `checks/check_registries.py` — item/block names vs MC registries (port)
