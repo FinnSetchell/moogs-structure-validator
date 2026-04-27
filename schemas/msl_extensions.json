@@ -1,0 +1,13 @@
+{
+  "pool_element_types": {
+    "msl:versioned_single_pool_element": {
+      "description": "MSL element mapping MC version ranges to NBT resource locations.",
+      "required_properties": ["element_type", "locations"],
+      "properties": {
+        "element_type": "msl:versioned_single_pool_element",
+        "locations": "object — MC version string keys, NBT resource location values",
+        "projection": "string (optional)"
+      }
+    }
+  }
+}

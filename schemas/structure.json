@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type":               { "type": "string" },
+    "biomes":             {},
+    "step":               { "type": "string" },
+    "spawn_overrides":    {},
+    "terrain_adaptation": { "type": "string" },
+    "start_pool":         { "type": "string" },
+    "size":               { "type": "integer" }
+  }
+}

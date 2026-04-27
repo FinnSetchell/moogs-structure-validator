@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "type": "object",
+  "required": ["processors"],
+  "properties": {
+    "processors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["processor_type"],
+        "properties": {
+          "processor_type": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "type": "object",
+  "required": ["fallback", "elements"],
+  "properties": {
+    "fallback": { "type": "string" },
+    "elements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["weight", "element"],
+        "properties": {
+          "weight": { "type": "integer" },
+          "element": {
+            "type": "object",
+            "required": ["element_type"],
+            "properties": {
+              "element_type": { "type": "string" },
+              "location":     { "type": "string" },
+              "locations":    { "type": "object" },
+              "processors":   {},
+              "projection":   { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
