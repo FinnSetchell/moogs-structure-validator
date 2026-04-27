@@ -13,9 +13,13 @@
           "weight": { "type": "integer" },
           "element": {
             "type": "object",
-            "required": ["element_type"],
+            "anyOf": [
+              { "required": ["element_type"] },
+              { "required": ["type"] }
+            ],
             "properties": {
               "element_type": { "type": "string" },
+              "type":         { "type": "string" },
               "location":     { "type": "string" },
               "locations":    { "type": "object" },
               "processors":   {},

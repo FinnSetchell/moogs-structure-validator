@@ -28,21 +28,21 @@ def _load_json(path: Path) -> dict | None:
         return None
 
 
-def _collect_pool_locations(pool_data: dict, msl: bool) -> list[str]:
+def _collect_pool_locations(pool_data: dict) -> list[str]:
     locations = []
     for entry in pool_data.get("elements", []):
         element = entry.get("element", {})
         loc = element.get("location")
         if loc:
             locations.append(loc)
-        if msl and element.get("element_type") == "msl:versioned_single_pool_element":
+        if element.get("type") == "moogs_structures:versioned_single_pool_element":
             for versioned_loc in element.get("locations", {}).values():
                 locations.append(versioned_loc)
     return locations
 
 
 def _check_pool_to_nbt(
-    template_pool_dir: Path, structures_dir: Path, namespace: str, msl: bool
+    template_pool_dir: Path, structures_dir: Path, namespace: str
 ) -> list[str]:
     errors = []
     for json_path in sorted(template_pool_dir.rglob("*.json")):
@@ -50,7 +50,7 @@ def _check_pool_to_nbt(
         if data is None:
             continue
         pool_rel = json_path.relative_to(template_pool_dir)
-        for loc in _collect_pool_locations(data, msl):
+        for loc in _collect_pool_locations(data):
             nbt_path = _loc_to_path(loc, namespace, structures_dir, ".nbt")
             if nbt_path is None:
                 continue
@@ -60,14 +60,14 @@ def _check_pool_to_nbt(
 
 
 def _check_orphaned_nbt(
-    template_pool_dir: Path, structures_dir: Path, namespace: str, msl: bool
+    template_pool_dir: Path, structures_dir: Path, namespace: str
 ) -> list[str]:
     referenced: set[Path] = set()
     for json_path in sorted(template_pool_dir.rglob("*.json")):
         data = _load_json(json_path)
         if data is None:
             continue
-        for loc in _collect_pool_locations(data, msl):
+        for loc in _collect_pool_locations(data):
             nbt_path = _loc_to_path(loc, namespace, structures_dir, ".nbt")
             if nbt_path:
                 referenced.add(nbt_path.resolve())
@@ -133,7 +133,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     failed = False
     orphan_count = 0
 
-    errors = _check_pool_to_nbt(template_pool_dir, structures_dir, ctx.namespace, ctx.msl)
+    errors = _check_pool_to_nbt(template_pool_dir, structures_dir, ctx.namespace)
     if errors:
         print(f"  [1/4] Pool -> NBT        {len(errors)} missing:")
         for e in errors:
@@ -142,7 +142,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     else:
         print(f"  [1/4] Pool -> NBT        OK")
 
-    orphans = _check_orphaned_nbt(template_pool_dir, structures_dir, ctx.namespace, ctx.msl)
+    orphans = _check_orphaned_nbt(template_pool_dir, structures_dir, ctx.namespace)
     orphan_count = len(orphans)
     if orphans:
         print(f"  [2/4] Orphaned NBT       {orphan_count} unreferenced:")
