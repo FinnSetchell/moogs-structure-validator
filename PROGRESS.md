@@ -13,7 +13,7 @@
 ## In Progress
 
 ## Pending
-- [ ] Fix `check_loot_table_schemas.py` — rewrite with resolve_refs, patch_schema, Draft4Validator, referencing.Registry retriever
-- [ ] Fix `check_registries.py` — add NBT palette block check + broaden item collection to catch function+name pattern
-- [ ] `schemas/patcher.py` + `schemas/msl_extensions.json` + `checks/check_worldgen_schemas.py` — schema infrastructure + worldgen validation (NEW)
+- [x] Fix `check_loot_table_schemas.py` — rewrite with resolve_refs, patch_schema, Draft4Validator, referencing.Registry retriever
+- [x] Fix `check_registries.py` — add NBT palette block check + broaden item collection to catch function+name pattern
+- [ ] `schemas/*.json` (bundled minimal schemas) + `schemas/patcher.py` + `schemas/msl_extensions.json` + `checks/check_worldgen_schemas.py` — note: misode/minecraft-json-schemas has no worldgen schemas; will use hand-crafted minimal schemas bundled in the repo
 - [ ] End-to-end integration test against MoogsBountifulStructures
