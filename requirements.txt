@@ -1,0 +1,4 @@
+nbtlib
+jsonschema
+referencing
+requests
