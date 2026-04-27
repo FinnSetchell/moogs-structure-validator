@@ -1,11 +1,12 @@
 ## Done
 - [x] Created PROGRESS.md, requirements.txt, and README.md scaffolding
+- [x] `validator.py` — entry point: config loading, check orchestration, CLI args
+- [x] `registries/fetcher.py` — multi-version registry fetch, intersection, per-version caching
+- [x] Stub check modules created (all 6 checks)
 
 ## In Progress
 
 ## Pending
-- [ ] `validator.py` — entry point: config loading, check orchestration, CLI args
-- [ ] `registries/fetcher.py` — multi-version registry fetch, intersection, per-version caching
 - [ ] `checks/nbt_check.py` — NBT readability check (port from MoogsBountifulStructures)
 - [ ] `checks/check_data_integrity.py` — pool→NBT→worldgen→structure_set chain (port)
 - [ ] `checks/check_loot_tables.py` — loot table refs in NBT files (port)
