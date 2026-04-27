@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import nbtlib
+
 from utils.paths import data_dir
 
 if TYPE_CHECKING:
@@ -26,6 +28,13 @@ def _collect_ids(node: object, items: set[str], blocks: set[str]) -> None:
             block = node.get("block")
             if isinstance(block, str) and ":" in block:
                 blocks.add(block)
+
+        # function node with explicit name (e.g. set_item): name is an item ID
+        func = node.get("function", "")
+        if isinstance(func, str) and func:
+            name = node.get("name")
+            if isinstance(name, str) and ":" in name:
+                items.add(name)
 
         for val in node.values():
             _collect_ids(val, items, blocks)
@@ -72,6 +81,27 @@ def run(ctx: ValidatorContext) -> bool:
         id_ for id_ in all_blocks if not _is_valid(id_, ctx.valid_blocks, ctx.extra_ids)
     )
 
+    structure_dir = data_dir(namespace_root, "structure")
+    unknown_palette_blocks: list[str] = []
+
+    if structure_dir.exists():
+        for nbt_path in sorted(structure_dir.rglob("*.nbt")):
+            try:
+                nbt = nbtlib.load(str(nbt_path))
+            except Exception:
+                continue
+            palette = nbt.get("palette")
+            if palette is None:
+                continue
+            for entry in palette:
+                name_tag = entry.get("Name")
+                if name_tag is None:
+                    continue
+                name = str(name_tag)
+                if ":" in name and not _is_valid(name, ctx.valid_blocks, ctx.extra_ids):
+                    rel = nbt_path.relative_to(structure_dir)
+                    unknown_palette_blocks.append(f"{rel}: {name}")
+
     if unknown_items:
         print(f"[check_registries] {len(unknown_items)} unknown item ID(s) in loot tables:")
         for id_ in unknown_items:
@@ -82,7 +112,12 @@ def run(ctx: ValidatorContext) -> bool:
         for id_ in unknown_blocks:
             print(f"  {id_}")
 
-    if not unknown_items and not unknown_blocks:
+    if unknown_palette_blocks:
+        print(f"[check_registries] {len(unknown_palette_blocks)} unknown block ID(s) in NBT palettes:")
+        for entry in unknown_palette_blocks:
+            print(f"  {entry}")
+
+    if not unknown_items and not unknown_blocks and not unknown_palette_blocks:
         print("[check_registries] all item and block IDs valid")
 
-    return not unknown_items and not unknown_blocks
+    return not unknown_items and not unknown_blocks and not unknown_palette_blocks

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urljoin
 
 import jsonschema
+import referencing
+import referencing.jsonschema
 
 from utils.paths import data_dir
 
@@ -13,24 +18,96 @@ if TYPE_CHECKING:
     from validator import ValidatorContext
 
 
-_SCHEMA_URL = "https://raw.githubusercontent.com/misode/minecraft-json-schemas/main/data/loot_table.json"
+_SCHEMA_URL = "https://raw.githubusercontent.com/misode/minecraft-json-schemas/master/java/data/loot_table.json"
 _CACHE_FILE = Path(__file__).parent.parent / "cache" / "schema-loot_table.json"
+_REFS_CACHE_DIR = Path(__file__).parent.parent / "cache" / "schema-refs"
 
 
-def _load_schema(refresh: bool) -> dict:
-    if _CACHE_FILE.exists() and not refresh:
-        with _CACHE_FILE.open() as f:
-            return json.load(f)
+def resolve_refs(node: object, base_url: str) -> object:
+    if isinstance(node, dict):
+        out = {}
+        for k, v in node.items():
+            if k == "$ref" and isinstance(v, str) and not v.startswith("#") and "://" not in v:
+                out[k] = urljoin(base_url, v)
+            else:
+                out[k] = resolve_refs(v, base_url)
+        return out
+    elif isinstance(node, list):
+        return [resolve_refs(item, base_url) for item in node]
+    return node
 
-    print("[check_loot_table_schemas] fetching schema...")
-    with urllib.request.urlopen(_SCHEMA_URL) as resp:
-        schema = json.loads(resp.read().decode())
 
-    _CACHE_FILE.parent.mkdir(exist_ok=True)
-    with _CACHE_FILE.open("w") as f:
-        json.dump(schema, f)
+def patch_schema(schema: dict) -> dict:
+    s = copy.deepcopy(schema)
 
-    return schema
+    s.pop("additionalProperties", None)
+    props = s.setdefault("properties", {})
+    props.setdefault("type", {"type": "string"})
+    props.setdefault("random_sequence", {"type": "string"})
+
+    pools_items = (
+        s.get("properties", {})
+        .get("pools", {})
+        .get("items", {})
+    )
+    if pools_items:
+        pools_items.pop("additionalProperties", None)
+        dist = {"oneOf": [{"type": ["number", "integer"]}, {"type": "object"}]}
+        pool_props = pools_items.setdefault("properties", {})
+        pool_props["rolls"] = dist
+        pool_props["bonus_rolls"] = dist
+
+        entries_items = pool_props.get("entries", {}).get("items", {})
+        if entries_items:
+            entries_items.pop("oneOf", None)
+            entries_items.pop("required", None)
+            entries_items.pop("additionalProperties", None)
+            entries_items["type"] = "object"
+            entries_items["required"] = ["type"]
+            entries_items["properties"] = {
+                "type": {"type": "string"},
+                "name": {},
+                "weight": {},
+                "quality": {},
+                "functions": {},
+                "conditions": {},
+                "children": {},
+                "entries": {},
+                "expand": {},
+                "value": {},
+            }
+
+    defs = s.get("definitions", {})
+    if "function" in defs:
+        defs["function"] = {
+            "type": "object",
+            "required": ["function"],
+            "properties": {"function": {"type": "string"}},
+        }
+
+    return s
+
+
+def make_retriever(cache_dir: Path, refresh: bool):
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def retriever(uri: str):
+        key = hashlib.md5(uri.encode()).hexdigest()
+        cache_file = cache_dir / key
+        if cache_file.exists() and not refresh:
+            with cache_file.open() as f:
+                contents = json.load(f)
+        else:
+            with urllib.request.urlopen(uri) as resp:
+                contents = json.loads(resp.read().decode())
+            with cache_file.open("w") as f:
+                json.dump(contents, f)
+        return referencing.Resource.from_contents(
+            contents,
+            default_specification=referencing.jsonschema.DRAFT4,
+        )
+
+    return retriever
 
 
 def run(ctx: ValidatorContext) -> bool:
@@ -41,13 +118,27 @@ def run(ctx: ValidatorContext) -> bool:
         print(f"[check_loot_table_schemas] loot table directory not found: {loot_table_dir}")
         return True
 
-    schema = _load_schema(ctx.refresh)
-    validator = jsonschema.Draft7Validator(schema)
-
     files = sorted(loot_table_dir.rglob("*.json"))
     if not files:
         print("[check_loot_table_schemas] no loot table files found")
         return True
+
+    if _CACHE_FILE.exists() and not ctx.refresh:
+        with _CACHE_FILE.open() as f:
+            schema = json.load(f)
+    else:
+        print("[check_loot_table_schemas] fetching schema...")
+        with urllib.request.urlopen(_SCHEMA_URL) as resp:
+            schema = json.loads(resp.read().decode())
+        _CACHE_FILE.parent.mkdir(exist_ok=True)
+        with _CACHE_FILE.open("w") as f:
+            json.dump(schema, f)
+
+    schema = resolve_refs(schema, _SCHEMA_URL)
+    schema = patch_schema(schema)
+
+    registry = referencing.Registry(retrieve=make_retriever(_REFS_CACHE_DIR, ctx.refresh))
+    validator = jsonschema.Draft4Validator(schema, registry=registry)
 
     failed = False
     for json_path in files:
