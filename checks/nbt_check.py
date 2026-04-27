@@ -4,14 +4,15 @@ from typing import TYPE_CHECKING
 
 import nbtlib
 
+from utils.paths import data_dir
+
 if TYPE_CHECKING:
     from validator import ValidatorContext
 
 
 def run(ctx: ValidatorContext) -> bool:
-    structures_dir = (
-        ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace / "structures"
-    )
+    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
+    structures_dir = data_dir(namespace_root, "structure")
 
     if not structures_dir.exists():
         print(f"[nbt_check] structures directory not found: {structures_dir}")

@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from utils.paths import data_dir as _data_dir
+
 if TYPE_CHECKING:
     from validator import ValidatorContext
 
@@ -123,11 +125,11 @@ def _section(title: str) -> None:
 
 
 def run(ctx: ValidatorContext) -> bool:
-    data_dir = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-    structures_dir = data_dir / "structures"
-    template_pool_dir = data_dir / "worldgen" / "template_pool"
-    worldgen_structure_dir = data_dir / "worldgen" / "structure"
-    structure_set_dir = data_dir / "worldgen" / "structure_set"
+    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
+    structures_dir = _data_dir(namespace_root, "structure")
+    template_pool_dir = namespace_root / "worldgen" / "template_pool"
+    worldgen_structure_dir = namespace_root / "worldgen" / "structure"
+    structure_set_dir = namespace_root / "worldgen" / "structure_set"
 
     for d in [structures_dir, template_pool_dir, worldgen_structure_dir, structure_set_dir]:
         if not d.exists():
