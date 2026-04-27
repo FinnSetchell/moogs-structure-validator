@@ -34,7 +34,7 @@ def fetch_registries(
         items_per_version.append({"minecraft:" + n for n in data.get("item", [])})
         blocks_per_version.append({"minecraft:" + n for n in data.get("block", [])})
 
-    valid_items = items_per_version[0].intersection(*items_per_version[1:]) if items_per_version else set()
-    valid_blocks = blocks_per_version[0].intersection(*blocks_per_version[1:]) if blocks_per_version else set()
+    valid_items = set().union(*items_per_version) if items_per_version else set()
+    valid_blocks = set().union(*blocks_per_version) if blocks_per_version else set()
 
     return valid_items, valid_blocks
