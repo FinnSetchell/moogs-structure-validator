@@ -10,13 +10,13 @@ if TYPE_CHECKING:
     from validator import ValidatorContext
 
 
-def run(ctx: ValidatorContext) -> bool:
+def run(ctx: ValidatorContext) -> tuple[bool, str]:
     namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
     structures_dir = data_dir(namespace_root, "structure")
 
     if not structures_dir.exists():
-        print(f"[nbt_check] structures directory not found: {structures_dir}")
-        return False
+        print(f"  structure directory not found: {structures_dir}")
+        return False, "structure directory missing"
 
     ok = 0
     corrupt: list[tuple[str, str]] = []
@@ -28,8 +28,15 @@ def run(ctx: ValidatorContext) -> bool:
             ok += 1
         except Exception as e:
             corrupt.append((str(rel), str(e)))
-            print(f"  [CORRUPT] {rel}")
-            print(f"            {e}")
 
-    print(f"\n{ok} file(s) OK, {len(corrupt)} corrupt.")
-    return len(corrupt) == 0
+    total = ok + len(corrupt)
+    if corrupt:
+        print(f"  {total} files scanned, {len(corrupt)} corrupt:")
+        for path, err in corrupt:
+            print(f"    {path}")
+            print(f"      {err}")
+    else:
+        print(f"  {total} files scanned, 0 corrupt")
+
+    summary = f"{total} files, {len(corrupt)} CORRUPT" if corrupt else f"{total} files, 0 corrupt"
+    return len(corrupt) == 0, summary

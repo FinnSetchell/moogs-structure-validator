@@ -33,17 +33,17 @@ def _loc_to_loot_path(location: str, namespace: str, loot_table_dir: Path) -> Pa
     return loot_table_dir / (path + ".json")
 
 
-def run(ctx: ValidatorContext) -> bool:
+def run(ctx: ValidatorContext) -> tuple[bool, str]:
     namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
     structure_dir = data_dir(namespace_root, "structure")
     loot_table_dir = data_dir(namespace_root, "loot_table")
 
     if not structure_dir.exists():
-        print(f"[check_loot_tables] structure directory not found: {structure_dir}")
-        return False
+        print(f"  structure directory not found: {structure_dir}")
+        return False, "structure directory missing"
     if not loot_table_dir.exists():
-        print(f"[check_loot_tables] loot table directory not found: {loot_table_dir}")
-        return False
+        print(f"  loot table directory not found: {loot_table_dir}")
+        return False, "loot table directory missing"
 
     structure_tables: dict[str, set[str]] = {}
 
@@ -86,37 +86,33 @@ def run(ctx: ValidatorContext) -> bool:
                 if ref in tables:
                     other_refs[ref].append(struct)
 
-    print("=" * 60)
-    print("LOOT TABLE AUDIT")
-    print("=" * 60)
+    total = len(structure_tables)
+    with_loot = sum(1 for t in structure_tables.values() if t)
+    print(f"  {total} structures scanned: {with_loot} with loot tables, {total - with_loot} without")
 
     if missing:
-        print(f"\n[MISSING] {len(missing)} loot table(s) referenced but not found in project:\n")
+        print(f"  {len(missing)} missing loot table(s):")
         for ref, structs in sorted(missing.items()):
             expected = _loc_to_loot_path(ref, ctx.namespace, loot_table_dir)
             expected_rel = expected.relative_to(loot_table_dir) if expected else ref
-            print(f"  {ref}  (expected file: {expected_rel})")
+            print(f"    {ref}")
+            print(f"      expected file: {expected_rel}")
             for s in sorted(structs):
-                print(f"    used by: {s}")
+                print(f"      used by: {s}")
     else:
-        print(f"\n[OK] All {ctx.namespace}: loot tables exist in the project.")
+        print(f"  no missing {ctx.namespace}: loot tables")
 
     if minecraft_refs:
-        print(f"\n[MINECRAFT] {len(minecraft_refs)} vanilla loot table(s) used (minecraft: namespace):\n")
-        for ref, structs in sorted(minecraft_refs.items()):
-            print(f"  {ref}")
-            for s in sorted(structs):
-                print(f"    used by: {s}")
+        print(f"  {len(minecraft_refs)} vanilla (minecraft:) loot table(s) referenced")
 
     if other_refs:
-        print(f"\n[UNKNOWN NAMESPACE] {len(other_refs)} loot table(s) with unrecognised namespace:\n")
-        for ref, structs in sorted(other_refs.items()):
-            print(f"  {ref}")
-            for s in sorted(structs):
-                print(f"    used by: {s}")
+        print(f"  {len(other_refs)} loot table(s) with unrecognised namespace:")
+        for ref in sorted(other_refs):
+            print(f"    {ref}")
 
-    with_loot = sum(1 for t in structure_tables.values() if t)
-    without_loot = len(structure_tables) - with_loot
-    print(f"\n{len(structure_tables)} structure(s) scanned — {with_loot} with loot tables, {without_loot} without.")
+    if missing:
+        summary = f"{with_loot} / {total} structures, {len(missing)} missing loot table(s)"
+    else:
+        summary = f"{with_loot} / {total} structures have loot tables"
 
-    return not missing
+    return not missing, summary

@@ -7,6 +7,8 @@ from pathlib import Path
 
 from registries.fetcher import fetch_registries
 
+_W = 70
+
 
 @dataclass
 class ValidatorContext:
@@ -44,7 +46,12 @@ def load_config(config_path: Path) -> dict:
     return cfg
 
 
-def run_checks(ctx: ValidatorContext) -> list[str]:
+def _banner(title: str) -> None:
+    tail = "-" * max(0, _W - len(title) - 5)
+    print(f"\n--- {title} {tail}")
+
+
+def run_checks(ctx: ValidatorContext) -> list[tuple[str, bool, str]]:
     import checks.nbt_check as nbt_check
     import checks.check_data_integrity as check_data_integrity
     import checks.check_loot_tables as check_loot_tables
@@ -61,18 +68,38 @@ def run_checks(ctx: ValidatorContext) -> list[str]:
         ("check_worldgen_schemas", check_worldgen_schemas),
     ]
 
-    failed: list[str] = []
+    results: list[tuple[str, bool, str]] = []
     for name, module in check_modules:
+        _banner(name)
         try:
-            passed = module.run(ctx)
-            if not passed:
-                failed.append(name)
+            passed, summary = module.run(ctx)
         except Exception:
-            print(f"\n[{name}] crashed:")
+            print("  [crashed]")
             traceback.print_exc()
-            failed.append(name)
+            passed, summary = False, "crashed with exception"
+        print(f"  {'PASS' if passed else 'FAIL'}")
+        results.append((name, passed, summary))
 
-    return failed
+    return results
+
+
+def _print_summary(results: list[tuple[str, bool, str]]) -> None:
+    print(f"\n{'=' * _W}")
+    print("  SUMMARY")
+    print("=" * _W)
+    name_w = max(len(n) for n, _, _ in results) + 2
+    for name, passed, summary in results:
+        status = "PASS" if passed else "FAIL"
+        print(f"  {status}  {name:<{name_w}} {summary}")
+    n_passed = sum(1 for _, p, _ in results if p)
+    n_failed = len(results) - n_passed
+    parts = []
+    if n_passed:
+        parts.append(f"{n_passed} passed")
+    if n_failed:
+        parts.append(f"{n_failed} failed")
+    print(f"\n  {', '.join(parts)}")
+    print("=" * _W)
 
 
 def main() -> None:
@@ -89,25 +116,27 @@ def main() -> None:
         mc_versions=cfg["mc_versions"],
         extra_ids_raw=cfg.get("extra_ids", []),
         msl=cfg.get("msl", False),
-        project_root=args.project_root,
+        project_root=Path(str(args.project_root).strip('"')),
         refresh=args.refresh,
     )
 
     ctx.extra_ids = resolve_extra_ids(ctx.extra_ids_raw, ctx.project_root)
 
+    versions_str = ", ".join(ctx.mc_versions)
+    print(f"Project: {ctx.namespace}  (versions: {versions_str})")
+
     cache_dir = Path(__file__).parent / "cache"
     cache_dir.mkdir(exist_ok=True)
+
+    print(f"Loading registries ({versions_str})...")
     ctx.valid_items, ctx.valid_blocks = fetch_registries(ctx.mc_versions, cache_dir, ctx.refresh)
+    print(f"  {len(ctx.valid_items)} items, {len(ctx.valid_blocks)} blocks")
 
-    failed = run_checks(ctx)
+    results = run_checks(ctx)
+    _print_summary(results)
 
-    if failed:
-        print(f"\nvalidation failed — {len(failed)} check(s) did not pass:")
-        for name in failed:
-            print(f"  - {name}")
+    if any(not passed for _, passed, _ in results):
         sys.exit(1)
-    else:
-        print("\nall checks passed")
 
 
 if __name__ == "__main__":

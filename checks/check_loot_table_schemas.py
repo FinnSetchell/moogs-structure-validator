@@ -110,24 +110,24 @@ def make_retriever(cache_dir: Path, refresh: bool):
     return retriever
 
 
-def run(ctx: ValidatorContext) -> bool:
+def run(ctx: ValidatorContext) -> tuple[bool, str]:
     namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
     loot_table_dir = data_dir(namespace_root, "loot_table")
 
     if not loot_table_dir.exists():
-        print(f"[check_loot_table_schemas] loot table directory not found: {loot_table_dir}")
-        return True
+        print("  no loot table directory — skipped")
+        return True, "skipped (no loot tables)"
 
     files = sorted(loot_table_dir.rglob("*.json"))
     if not files:
-        print("[check_loot_table_schemas] no loot table files found")
-        return True
+        print("  no loot table files found")
+        return True, "0 files"
 
     if _CACHE_FILE.exists() and not ctx.refresh:
         with _CACHE_FILE.open() as f:
             schema = json.load(f)
     else:
-        print("[check_loot_table_schemas] fetching schema...")
+        print("  fetching schema...")
         with urllib.request.urlopen(_SCHEMA_URL) as resp:
             schema = json.loads(resp.read().decode())
         _CACHE_FILE.parent.mkdir(exist_ok=True)
@@ -140,24 +140,26 @@ def run(ctx: ValidatorContext) -> bool:
     registry = referencing.Registry(retrieve=make_retriever(_REFS_CACHE_DIR, ctx.refresh))
     validator = jsonschema.Draft4Validator(schema, registry=registry)
 
-    failed = False
+    error_count = 0
     for json_path in files:
         rel = json_path.relative_to(loot_table_dir)
         try:
             with json_path.open() as f:
                 data = json.load(f)
         except json.JSONDecodeError as e:
-            print(f"  [ERROR] {rel} — invalid JSON: {e}")
-            failed = True
+            print(f"  {rel} — invalid JSON: {e}")
+            error_count += 1
             continue
 
         errors = sorted(validator.iter_errors(data), key=lambda e: list(e.path))
         for error in errors:
-            path = " > ".join(str(p) for p in error.absolute_path) if error.absolute_path else "(root)"
-            print(f"  [SCHEMA] {rel} @ {path} — {error.message}")
-            failed = True
+            path_str = " > ".join(str(p) for p in error.absolute_path) if error.absolute_path else "(root)"
+            print(f"  {rel} @ {path_str}")
+            print(f"    {error.message}")
+            error_count += 1
 
-    if not failed:
-        print(f"[check_loot_table_schemas] all {len(files)} loot table(s) valid")
+    if error_count == 0:
+        print(f"  {len(files)} files, 0 schema errors")
 
-    return not failed
+    summary = f"{len(files)} files, 0 errors" if error_count == 0 else f"{len(files)} files, {error_count} schema error(s)"
+    return error_count == 0, summary

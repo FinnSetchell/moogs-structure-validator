@@ -12,7 +12,7 @@ def _fetch_version(version: str, cache_dir: pathlib.Path, refresh: bool) -> dict
         with cache_file.open() as f:
             return json.load(f)
 
-    print(f"[registries] fetching {version}...")
+    print(f"  fetching {version}...")
     url = _REGISTRY_URL.format(version=version)
     with urllib.request.urlopen(url) as resp:
         data = json.loads(resp.read().decode())
@@ -31,11 +31,10 @@ def fetch_registries(
 
     for version in mc_versions:
         data = _fetch_version(version, cache_dir, refresh)
-        items_per_version.append(set(data.get("minecraft:item", {}).get("entries", {}).keys()))
-        blocks_per_version.append(set(data.get("minecraft:block", {}).get("entries", {}).keys()))
+        items_per_version.append({"minecraft:" + n for n in data.get("item", [])})
+        blocks_per_version.append({"minecraft:" + n for n in data.get("block", [])})
 
     valid_items = items_per_version[0].intersection(*items_per_version[1:]) if items_per_version else set()
     valid_blocks = blocks_per_version[0].intersection(*blocks_per_version[1:]) if blocks_per_version else set()
 
-    print(f"[registries] {len(valid_items)} items, {len(valid_blocks)} blocks valid across all versions")
     return valid_items, valid_blocks

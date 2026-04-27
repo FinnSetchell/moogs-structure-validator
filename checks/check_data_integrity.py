@@ -55,7 +55,7 @@ def _check_pool_to_nbt(
             if nbt_path is None:
                 continue
             if not nbt_path.exists():
-                errors.append(f"  {pool_rel}  ->  {loc}  (no matching .nbt)")
+                errors.append(f"{pool_rel}  ->  {loc}  (no matching .nbt)")
     return errors
 
 
@@ -95,7 +95,7 @@ def _check_structure_to_pool(
             continue
         if not pool_path.exists():
             rel = json_path.relative_to(worldgen_structure_dir)
-            errors.append(f"  {rel}  ->  {start_pool}  (pool not found)")
+            errors.append(f"{rel}  ->  {start_pool}  (pool not found)")
     return errors
 
 
@@ -114,17 +114,11 @@ def _check_set_to_structure(
             if struct_path is None:
                 continue
             if not struct_path.exists():
-                errors.append(f"  {rel}  ->  {structure_loc}  (worldgen structure not found)")
+                errors.append(f"{rel}  ->  {structure_loc}  (worldgen structure not found)")
     return errors
 
 
-def _section(title: str) -> None:
-    print(f"\n{'=' * 60}")
-    print(f"  {title}")
-    print("=" * 60)
-
-
-def run(ctx: ValidatorContext) -> bool:
+def run(ctx: ValidatorContext) -> tuple[bool, str]:
     namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
     structures_dir = _data_dir(namespace_root, "structure")
     template_pool_dir = namespace_root / "worldgen" / "template_pool"
@@ -133,52 +127,53 @@ def run(ctx: ValidatorContext) -> bool:
 
     for d in [structures_dir, template_pool_dir, worldgen_structure_dir, structure_set_dir]:
         if not d.exists():
-            print(f"[check_data_integrity] directory not found: {d}")
-            return False
+            print(f"  directory not found: {d}")
+            return False, "required directory missing"
 
     failed = False
+    orphan_count = 0
 
-    _section("1/4  Template pool locations -> NBT files")
     errors = _check_pool_to_nbt(template_pool_dir, structures_dir, ctx.namespace, ctx.msl)
     if errors:
-        print(f"\n[FAIL] {len(errors)} missing NBT file(s):\n")
+        print(f"  [1/4] Pool -> NBT        {len(errors)} missing:")
         for e in errors:
-            print(e)
+            print(f"          {e}")
         failed = True
     else:
-        print("\n[OK] All pool locations resolve to an existing .nbt file.")
+        print(f"  [1/4] Pool -> NBT        OK")
 
-    _section("2/4  Orphaned NBT files (not in any pool)")
     orphans = _check_orphaned_nbt(template_pool_dir, structures_dir, ctx.namespace, ctx.msl)
+    orphan_count = len(orphans)
     if orphans:
-        print(f"\n[WARN] {len(orphans)} .nbt file(s) not referenced by any template pool:\n")
+        print(f"  [2/4] Orphaned NBT       {orphan_count} unreferenced:")
         for o in orphans:
-            print(f"  {o}")
+            print(f"          {o}")
     else:
-        print("\n[OK] All .nbt files are referenced by at least one template pool.")
+        print(f"  [2/4] Orphaned NBT       OK")
 
-    _section("3/4  Worldgen structures -> template pools")
     errors = _check_structure_to_pool(worldgen_structure_dir, template_pool_dir, ctx.namespace)
     if errors:
-        print(f"\n[FAIL] {len(errors)} missing template pool(s):\n")
+        print(f"  [3/4] Structure -> Pool  {len(errors)} missing:")
         for e in errors:
-            print(e)
+            print(f"          {e}")
         failed = True
     else:
-        print("\n[OK] All worldgen structures point to existing template pools.")
+        print(f"  [3/4] Structure -> Pool  OK")
 
-    _section("4/4  Structure sets -> worldgen structures")
     errors = _check_set_to_structure(structure_set_dir, worldgen_structure_dir, ctx.namespace)
     if errors:
-        print(f"\n[FAIL] {len(errors)} missing worldgen structure(s):\n")
+        print(f"  [4/4] Set -> Structure   {len(errors)} missing:")
         for e in errors:
-            print(e)
+            print(f"          {e}")
         failed = True
     else:
-        print("\n[OK] All structure sets point to existing worldgen structures.")
+        print(f"  [4/4] Set -> Structure   OK")
 
-    print(f"\n{'=' * 60}")
-    print(f"  RESULT: {'FAILED' if failed else 'ALL CHECKS PASSED'}")
-    print("=" * 60)
+    if failed:
+        summary = "cross-reference errors found"
+    elif orphan_count:
+        summary = f"all cross-references OK  ({orphan_count} orphan warning)"
+    else:
+        summary = "all cross-references OK"
 
-    return not failed
+    return not failed, summary

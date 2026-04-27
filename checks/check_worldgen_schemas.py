@@ -26,11 +26,12 @@ def _load_schema(filename: str) -> dict:
         return json.load(f)
 
 
-def run(ctx: ValidatorContext) -> bool:
+def run(ctx: ValidatorContext) -> tuple[bool, str]:
     namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
 
     failed = False
-    total = 0
+    error_count = 0
+    counts: dict[str, int] = {}
 
     for subdir, schema_file in _SUBDIRS:
         worldgen_dir = namespace_root / "worldgen" / subdir
@@ -44,23 +45,36 @@ def run(ctx: ValidatorContext) -> bool:
         validator = jsonschema.Draft4Validator(schema)
 
         files = sorted(worldgen_dir.rglob("*.json"))
+        counts[subdir] = len(files)
+
         for json_path in files:
             rel = json_path.relative_to(worldgen_dir)
             try:
                 with json_path.open() as f:
                     data = json.load(f)
             except json.JSONDecodeError as e:
-                print(f"  [ERROR] {rel} — invalid JSON: {e}")
+                print(f"  [{subdir}] {rel} — invalid JSON: {e}")
+                error_count += 1
                 failed = True
                 continue
 
             errors = sorted(validator.iter_errors(data), key=lambda e: list(e.path))
             for error in errors:
-                path = " > ".join(str(p) for p in error.absolute_path) if error.absolute_path else "(root)"
-                print(f"  [SCHEMA] {rel} @ {path} — {error.message}")
+                path_str = " > ".join(str(p) for p in error.absolute_path) if error.absolute_path else "(root)"
+                print(f"  [{subdir}] {rel} @ {path_str}")
+                print(f"    {error.message}")
+                error_count += 1
                 failed = True
 
-            total += 1
+    total = sum(counts.values())
+    count_str = "  ".join(f"{k}: {v}" for k, v in counts.items() if v > 0)
 
-    print(f"[check_worldgen_schemas] checked {total} worldgen file(s)")
-    return not failed
+    if error_count == 0:
+        print(f"  {total} files validated, 0 schema errors")
+    else:
+        print(f"  {total} files validated, {error_count} schema error(s)")
+    if count_str:
+        print(f"  ({count_str})")
+
+    summary = f"{total} files, 0 errors" if error_count == 0 else f"{total} files, {error_count} error(s)"
+    return not failed, summary
