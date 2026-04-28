@@ -11,14 +11,13 @@
 - [x] `checks/check_registries.py` — item/block IDs in loot tables + NBT palettes vs MC registries; version-aware palette checking with block-added-in annotation
 - [x] `checks/check_worldgen_schemas.py` — worldgen JSON vs bundled minimal schemas
 - [x] `schemas/template_pool.json`, `structure.json`, `structure_set.json`, `processor_list.json` — bundled minimal JSON schemas; template_pool accepts both `element_type` and `type` fields
-- [x] `schemas/msl_extensions.json` — MSL element type documentation
-- [x] `schemas/patcher.py` — apply_msl hook for template pool schema
-- [x] Integration test: `validator.json` and `validate.bat` added to MoogsBountifulStructures for local testing; version compatibility issues resolved
-
-## In Progress
+- [x] `schemas/msl_*.json` — MSL element type and placement schemas
+- [x] `schemas/patcher.py` — apply_msl hook always applied to template pool schema
+- [x] Removed `msl` flag from config — MSL element types handled transparently
+- [x] `.gitignore` — excludes `.claude/`, `scratch/`, `cache/`, `__pycache__/`
+- [x] Integration test: `validator.json` and `validate.bat` in MoogsBountifulStructures for local testing
+- [x] MBS `release.yml` updated to use moogs-structure-validator; publish blocked on validate
+- [x] Tagged `v1` on moogs-structure-validator
 
 ## Pending
-- [ ] Update MBS `release.yml` to use moogs-structure-validator instead of local scripts
-- [x] Removed `msl` flag from config entirely — MSL element types are always handled transparently
-- [ ] Tag a `v1` release on moogs-structure-validator once release workflow is wired up
-- [ ] Extend `check_registries._collect_ids` with additional item locations (set_contents, give_item, etc.) as further gaps surface
+- [ ] Extend `check_registries._collect_ids` with additional item locations (set_contents, give_item, etc.) as further gaps surface during real releases
