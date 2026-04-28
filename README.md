@@ -16,8 +16,7 @@ Place this file at the root of each mod project:
     "create:copper_ingot",
     "biomesoplenty:*",
     "@allowed_ids.json"
-  ],
-  "msl": true
+  ]
 }
 ```
 
@@ -26,7 +25,6 @@ Place this file at the root of each mod project:
 | `namespace` | The mod's datapack namespace |
 | `mc_versions` | Every MC version this mod targets; drives registry fetching and versioned NBT logic |
 | `extra_ids` | Additional IDs to treat as valid: exact (`"create:copper_ingot"`), wildcard namespace (`"biomesoplenty:*"`), or file reference (`"@allowed_ids.json"`) |
-| `msl` | Enables Moogs Structure Lib schema extensions and versioned NBT handling |
 
 `@allowed_ids.json` is a flat JSON array of strings (can include wildcards) at the project root.
 

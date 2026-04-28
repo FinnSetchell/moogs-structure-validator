@@ -19,6 +19,6 @@
 
 ## Pending
 - [ ] Update MBS `release.yml` to use moogs-structure-validator instead of local scripts
-- [ ] Fix `validator.json` in MBS: `msl` should be `false` (MBS uses no MSL element types)
+- [x] Removed `msl` flag from config entirely — MSL element types are always handled transparently
 - [ ] Tag a `v1` release on moogs-structure-validator once release workflow is wired up
 - [ ] Extend `check_registries._collect_ids` with additional item locations (set_contents, give_item, etc.) as further gaps surface

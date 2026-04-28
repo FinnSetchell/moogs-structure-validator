@@ -39,7 +39,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             continue
 
         schema = _load_schema(schema_file)
-        if subdir == "template_pool" and ctx.msl:
+        if subdir == "template_pool":
             schema = schemas.patcher.apply_msl(schema)
 
         validator = jsonschema.Draft4Validator(schema)

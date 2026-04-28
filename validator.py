@@ -15,7 +15,6 @@ class ValidatorContext:
     namespace: str
     mc_versions: list[str]
     extra_ids_raw: list[str]
-    msl: bool
     project_root: Path
     refresh: bool
     extra_ids: set[str] = field(default_factory=set)
@@ -115,7 +114,6 @@ def main() -> None:
         namespace=cfg["namespace"],
         mc_versions=cfg["mc_versions"],
         extra_ids_raw=cfg.get("extra_ids", []),
-        msl=cfg.get("msl", False),
         project_root=Path(str(args.project_root).strip('"')),
         refresh=args.refresh,
     )
