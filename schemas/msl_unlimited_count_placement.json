@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "moogs_structures:unlimited_count",
+  "description": "A placement modifier that repeats placement a given number of times, with no upper bound enforced by the game.",
+  "type": "object",
+  "required": ["type", "count"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["moogs_structures:unlimited_count"]
+    },
+    "count": {
+      "description": "Number of times to repeat placement. Can be a constant integer or an IntProvider object (e.g. uniform_int, biased_to_bottom).",
+      "minimum": 0
+    }
+  }
+}

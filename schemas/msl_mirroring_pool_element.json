@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "moogs_structures:mirroring_single_pool_element",
+  "description": "A single pool element that applies a mirror transformation when placing the structure template.",
+  "type": "object",
+  "required": ["element_type", "location", "mirror"],
+  "properties": {
+    "element_type": {
+      "type": "string",
+      "enum": ["moogs_structures:mirroring_single_pool_element"]
+    },
+    "location": {
+      "type": "string",
+      "description": "Namespaced resource location pointing to the NBT structure file (e.g. 'mymod:village/house').",
+      "pattern": "^[a-z0-9_.-]+:[a-z0-9_./-]+$"
+    },
+    "mirror": {
+      "type": "string",
+      "enum": ["NONE", "LEFT_RIGHT", "FRONT_BACK"],
+      "description": "Mirror axis applied when placing the structure template."
+    },
+    "processors": {
+      "description": "Processor list applied to the structure template. Follows vanilla single_pool_element processor list format."
+    },
+    "projection": {
+      "type": "string",
+      "enum": ["rigid", "terrain_matching"],
+      "description": "How the structure is placed relative to terrain."
+    },
+    "override_liquid_settings": {
+      "type": "string",
+      "enum": ["apply_waterlogging", "ignore_waterlogging"]
+    }
+  }
+}

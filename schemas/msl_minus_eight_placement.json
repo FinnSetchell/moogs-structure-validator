@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "moogs_structures:minus_eight_placement",
+  "description": "A placement modifier that offsets the position by -8 on both X and Z axes. Takes no configuration.",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["moogs_structures:minus_eight_placement"]
+    }
+  }
+}

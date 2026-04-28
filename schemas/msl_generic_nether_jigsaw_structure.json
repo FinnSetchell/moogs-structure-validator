@@ -1,0 +1,91 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "moogs_structures:moogs_structures_generic_nether_jigsaw_structure",
+  "description": "MSL's jigsaw structure type for Nether dimensions. Searches for a land surface above or below the structure and anchors to it.",
+  "type": "object",
+  "required": ["type", "start_pool", "size", "start_height", "land_search_direction"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["moogs_structures:moogs_structures_generic_nether_jigsaw_structure"]
+    },
+
+    "biomes":             {},
+    "step":               { "type": "string" },
+    "spawn_overrides":    {},
+    "terrain_adaptation": { "type": "string" },
+
+    "start_pool": {
+      "type": "string",
+      "description": "Namespaced resource location of the starting template pool.",
+      "pattern": "^[a-z0-9_.-]+:[a-z0-9_./-]+$"
+    },
+    "size": {
+      "type": "integer",
+      "description": "Jigsaw expansion depth. Must be between 0 and 30.",
+      "minimum": 0,
+      "maximum": 30
+    },
+    "start_height": {
+      "description": "HeightProvider controlling the initial Y position before the land search is applied."
+    },
+    "land_search_direction": {
+      "type": "string",
+      "enum": ["HIGHEST_LAND", "LOWEST_LAND"],
+      "description": "Whether to anchor the structure to the highest or lowest land surface found within the bounding box."
+    },
+    "y_allowance": {
+      "type": "object",
+      "description": "Restricts the Y range in which this structure is allowed to spawn.",
+      "properties": {
+        "min_y_allowed": {
+          "type": "integer",
+          "description": "Minimum world Y the structure may spawn at (inclusive)."
+        },
+        "max_y_allowed": {
+          "type": "integer",
+          "description": "Maximum world Y the structure may spawn at (inclusive). Must be >= min_y_allowed."
+        }
+      }
+    },
+    "ledge_offset_y": {
+      "type": "integer",
+      "description": "Additional Y offset applied after the structure is anchored to the land surface. Range: 0–100.",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "cannot_spawn_in_liquid": {
+      "type": "boolean",
+      "description": "If true, prevents the structure from spawning when the resolved surface is liquid. Defaults to false."
+    },
+    "valid_biome_radius_check": {
+      "type": "integer",
+      "description": "Radius in chunks within which all biomes must pass the structure's biome filter. Range: 1–100.",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "pools_that_ignore_boundaries": {
+      "type": "array",
+      "description": "Resource locations of template pools whose pieces are allowed to extend outside the structure's bounding box.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9_.-]+:[a-z0-9_./-]+$"
+      }
+    },
+    "max_distance_from_center": {
+      "type": "integer",
+      "description": "Maximum block distance a jigsaw piece may be placed from the structure centre. Range: 1–128.",
+      "minimum": 1,
+      "maximum": 128
+    },
+    "use_bounding_box_hack": {
+      "type": "boolean",
+      "description": "Enables a bounding box workaround for structures that fail to assemble correctly. Defaults to false."
+    },
+    "liquid_settings": {
+      "type": "string",
+      "enum": ["apply_waterlogging", "ignore_waterlogging"],
+      "description": "Controls waterlogging behaviour during structure placement."
+    }
+  }
+}

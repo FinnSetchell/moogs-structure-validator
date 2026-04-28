@@ -1,0 +1,109 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "moogs_structures:moogs_structures_generic_jigsaw_structure",
+  "description": "MSL's general-purpose jigsaw structure type with extended spawning controls.",
+  "type": "object",
+  "required": ["type", "start_pool", "size", "start_height"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["moogs_structures:moogs_structures_generic_jigsaw_structure"]
+    },
+
+    "biomes":             {},
+    "step":               { "type": "string" },
+    "spawn_overrides":    {},
+    "terrain_adaptation": { "type": "string" },
+
+    "start_pool": {
+      "type": "string",
+      "description": "Namespaced resource location of the starting template pool.",
+      "pattern": "^[a-z0-9_.-]+:[a-z0-9_./-]+$"
+    },
+    "size": {
+      "type": "integer",
+      "description": "Jigsaw expansion depth. Must be between 0 and 30.",
+      "minimum": 0,
+      "maximum": 30
+    },
+    "start_height": {
+      "description": "HeightProvider controlling the Y position the structure starts generating at."
+    },
+    "project_start_to_heightmap": {
+      "type": "string",
+      "enum": [
+        "WORLD_SURFACE_WG",
+        "OCEAN_FLOOR_WG",
+        "MOTION_BLOCKING",
+        "MOTION_BLOCKING_NO_LEAVES",
+        "OCEAN_FLOOR",
+        "WORLD_SURFACE"
+      ],
+      "description": "If set, the structure's start Y is projected onto this heightmap before generation."
+    },
+    "y_allowance": {
+      "type": "object",
+      "description": "Restricts the Y range in which this structure is allowed to spawn.",
+      "properties": {
+        "min_y_allowed": {
+          "type": "integer",
+          "description": "Minimum world Y the structure may spawn at (inclusive)."
+        },
+        "max_y_allowed": {
+          "type": "integer",
+          "description": "Maximum world Y the structure may spawn at (inclusive). Must be >= min_y_allowed."
+        }
+      }
+    },
+    "cannot_spawn_in_liquid": {
+      "type": "boolean",
+      "description": "If true, prevents the structure from spawning when the surface block at the chunk centre is a liquid. Defaults to false."
+    },
+    "terrain_height_radius_check": {
+      "type": "integer",
+      "description": "Radius in chunks over which terrain height is sampled. Required for allowed_terrain_height_range and y_allowance min checks. Range: 1–100.",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "allowed_terrain_height_range": {
+      "type": "integer",
+      "description": "Maximum permitted difference between the highest and lowest terrain samples within terrain_height_radius_check. Range: 1–1000.",
+      "minimum": 1,
+      "maximum": 1000
+    },
+    "valid_biome_radius_check": {
+      "type": "integer",
+      "description": "Radius in chunks within which all biomes must pass the structure's biome filter. Range: 1–100.",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "pools_that_ignore_boundaries": {
+      "type": "array",
+      "description": "Resource locations of template pools whose pieces are allowed to extend outside the structure's bounding box.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9_.-]+:[a-z0-9_./-]+$"
+      }
+    },
+    "max_distance_from_center": {
+      "type": "integer",
+      "description": "Maximum block distance a jigsaw piece may be placed from the structure centre. Range: 1–128.",
+      "minimum": 1,
+      "maximum": 128
+    },
+    "burying_type": {
+      "type": "string",
+      "enum": ["LOWEST_CORNER", "AVERAGE_LAND", "LOWEST_SIDE"],
+      "description": "Post-generation vertical adjustment mode. LOWEST_CORNER aligns to the lowest bounding-box corner, AVERAGE_LAND to the average terrain height, LOWEST_SIDE to the lowest side midpoint."
+    },
+    "use_bounding_box_hack": {
+      "type": "boolean",
+      "description": "Enables a bounding box workaround for structures that fail to assemble correctly. Defaults to false."
+    },
+    "liquid_settings": {
+      "type": "string",
+      "enum": ["apply_waterlogging", "ignore_waterlogging"],
+      "description": "Controls waterlogging behaviour during structure placement."
+    }
+  }
+}

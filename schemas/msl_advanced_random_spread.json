@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "moogs_structures:advanced_random_spread",
+  "description": "An extended random spread structure placement that adds a super exclusion zone and minimum world-origin distance on top of vanilla random_spread.",
+  "type": "object",
+  "required": ["type", "salt", "spacing", "separation"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["moogs_structures:advanced_random_spread"]
+    },
+
+    "salt": {
+      "type": "integer",
+      "description": "Per-structure RNG salt. Must be unique across all structure sets to avoid positional correlation.",
+      "minimum": 0
+    },
+    "spacing": {
+      "type": "integer",
+      "description": "Average distance in chunks between two structure attempts. Must be greater than separation.",
+      "minimum": 0
+    },
+    "separation": {
+      "type": "integer",
+      "description": "Minimum distance in chunks between two structure attempts. Must be less than spacing.",
+      "minimum": 0
+    },
+    "spread_type": {
+      "type": "string",
+      "enum": ["linear", "triangular"],
+      "description": "Distribution used when scattering structures within a region. Defaults to 'linear'."
+    },
+
+    "locate_offset": {
+      "description": "Block offset [x, y, z] applied when locating this structure. Each component is clamped to [-16, 16]. Defaults to [0, 0, 0].",
+      "type": "array",
+      "items": { "type": "integer", "minimum": -16, "maximum": 16 },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "frequency_reduction_method": {
+      "type": "string",
+      "enum": ["DEFAULT", "LEGACY_TYPE_1", "LEGACY_TYPE_2", "LEGACY_TYPE_3"],
+      "description": "Algorithm used to apply the frequency filter. Defaults to 'DEFAULT'."
+    },
+    "frequency": {
+      "type": "number",
+      "description": "Probability (0.0–1.0) that a candidate chunk actually produces a structure. Defaults to 1.0.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "exclusion_zone": {
+      "type": "object",
+      "description": "Vanilla exclusion zone: prevents this structure from spawning near another structure set.",
+      "required": ["other_set", "chunk_count"],
+      "properties": {
+        "other_set": {
+          "type": "string",
+          "description": "Resource location of the structure set to avoid."
+        },
+        "chunk_count": {
+          "type": "integer",
+          "description": "Chunk radius within which no chunk of other_set may exist.",
+          "minimum": 1
+        }
+      }
+    },
+
+    "super_exclusion_zone": {
+      "type": "object",
+      "description": "MSL exclusion zone that checks a list of structure sets rather than a single one.",
+      "required": ["other_set", "chunk_count"],
+      "properties": {
+        "other_set": {
+          "description": "List of structure set resource locations to avoid.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9_.-]+:[a-z0-9_./-]+$"
+          }
+        },
+        "chunk_count": {
+          "type": "integer",
+          "description": "Chunk radius within which none of the listed structure sets may have a structure chunk.",
+          "minimum": 1
+        },
+        "allowed_chunk_count": {
+          "type": "integer",
+          "description": "Optional larger radius: if none of the listed sets appear within this range either, the exclusion is lifted.",
+          "minimum": 1
+        }
+      }
+    },
+    "min_distance_from_world_origin": {
+      "type": "integer",
+      "description": "Minimum block distance from world origin (0, 0) before this structure may spawn.",
+      "minimum": 0
+    }
+  }
+}

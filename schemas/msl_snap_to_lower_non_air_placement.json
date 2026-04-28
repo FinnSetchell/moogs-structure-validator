@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "moogs_structures:snap_to_lower_non_air_placement",
+  "description": "A placement modifier that moves the position downward until it hits a non-air block. Takes no configuration.",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["moogs_structures:snap_to_lower_non_air_placement"]
+    }
+  }
+}

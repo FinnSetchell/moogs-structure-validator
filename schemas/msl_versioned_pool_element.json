@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "moogs_structures:versioned_single_pool_element",
+  "description": "A custom template pool element that resolves different structure templates based on the running Minecraft version.",
+  "type": "object",
+  "required": ["element_type"],
+  "anyOf": [
+    { "required": ["location"] },
+    { "required": ["locations"] }
+  ],
+  "properties": {
+    "element_type": {
+      "type": "string",
+      "enum": ["moogs_structures:versioned_single_pool_element"]
+    },
+    "location": {
+      "type": "string",
+      "description": "Fallback namespaced resource location pointing to an NBT structure file (e.g. 'mymod:village/house'). Used when no version-specific entry in 'locations' matches.",
+      "pattern": "^[a-z0-9_.-]+:[a-z0-9_./-]+$"
+    },
+    "locations": {
+      "type": "object",
+      "description": "Version-ranged structure template locations. Keys are either a single version ('1.21') or an inclusive range ('1.21-1.21.1'). Values are namespaced resource locations pointing to NBT files.",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[a-z0-9_.-]+:[a-z0-9_./-]+$"
+      }
+    },
+    "processors": {
+      "description": "Processor list applied to the structure template. Follows vanilla single_pool_element processor list format."
+    },
+    "projection": {
+      "type": "string",
+      "enum": ["rigid", "terrain_matching"],
+      "description": "How the structure is placed relative to terrain. 'rigid' places it at a fixed height; 'terrain_matching' conforms to the ground."
+    },
+    "override_liquid_settings": {
+      "type": "string",
+      "enum": ["apply_waterlogging", "ignore_waterlogging"],
+      "description": "Controls whether liquid waterlogging is applied when placing the structure."
+    }
+  }
+}

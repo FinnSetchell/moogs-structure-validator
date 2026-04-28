@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "moogs_structures:legacy_ocean_bottom_single_pool_element",
+  "description": "A single pool element that ignores structure blocks and air when placed, for use with ocean-bottom structures that need legacy placement behaviour.",
+  "type": "object",
+  "required": ["element_type", "location"],
+  "properties": {
+    "element_type": {
+      "type": "string",
+      "enum": ["moogs_structures:legacy_ocean_bottom_single_pool_element"]
+    },
+    "location": {
+      "type": "string",
+      "description": "Namespaced resource location pointing to the NBT structure file (e.g. 'mymod:ocean/ruin').",
+      "pattern": "^[a-z0-9_.-]+:[a-z0-9_./-]+$"
+    },
+    "processors": {
+      "description": "Processor list applied to the structure template. Follows vanilla single_pool_element processor list format."
+    },
+    "projection": {
+      "type": "string",
+      "enum": ["rigid", "terrain_matching"],
+      "description": "How the structure is placed relative to terrain."
+    },
+    "override_liquid_settings": {
+      "type": "string",
+      "enum": ["apply_waterlogging", "ignore_waterlogging"]
+    }
+  }
+}
