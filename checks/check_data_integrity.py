@@ -35,7 +35,8 @@ def _collect_pool_locations(pool_data: dict) -> list[str]:
         loc = element.get("location")
         if loc:
             locations.append(loc)
-        if element.get("type") == "moogs_structures:versioned_single_pool_element":
+        el_type = element.get("element_type") or element.get("type", "")
+        if el_type == "moogs_structures:versioned_single_pool_element":
             for versioned_loc in element.get("locations", {}).values():
                 locations.append(versioned_loc)
     return locations

@@ -37,7 +37,8 @@ def _build_nbt_min_versions(
 
         for entry in data.get("elements", []):
             element = entry.get("element", {})
-            if element.get("type") == "moogs_structures:versioned_single_pool_element":
+            el_type = element.get("element_type") or element.get("type", "")
+            if el_type == "moogs_structures:versioned_single_pool_element":
                 for range_key, loc in element.get("locations", {}).items():
                     lower = range_key.split("-")[0]
                     nbt_path = _loc_to_path(loc, namespace, structures_dir, ".nbt")
