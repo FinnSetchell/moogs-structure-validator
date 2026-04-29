@@ -51,6 +51,7 @@ def _banner(title: str) -> None:
 
 
 def run_checks(ctx: ValidatorContext) -> list[tuple[str, bool, str]]:
+    import checks.check_directory_names as check_directory_names
     import checks.nbt_check as nbt_check
     import checks.check_data_integrity as check_data_integrity
     import checks.check_loot_tables as check_loot_tables
@@ -59,6 +60,7 @@ def run_checks(ctx: ValidatorContext) -> list[tuple[str, bool, str]]:
     import checks.check_worldgen_schemas as check_worldgen_schemas
 
     check_modules = [
+        ("check_directory_names", check_directory_names),
         ("nbt_check", nbt_check),
         ("check_data_integrity", check_data_integrity),
         ("check_loot_tables", check_loot_tables),
