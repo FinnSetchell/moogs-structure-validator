@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 
 _VERSIONS_URL = "https://raw.githubusercontent.com/misode/mcmeta/summary/versions/data.json"
+_NEW_FORMAT_BOUNDARY_DV = 3837  # 1.20.5
 
 
 def _load_version_map(cache_dir: Path, refresh: bool) -> dict[str, int]:
@@ -45,6 +46,24 @@ def _is_valid(id_: str, valid_set: set[str], extra_ids: set[str]) -> bool:
     return False
 
 
+def _check_item_format(item: nbtlib.Compound, slot_desc: str, entity_id: str, rel: str, expect_old: bool, min_version_name: str) -> str | None:
+    if "id" not in item:
+        return None
+    has_old = "Count" in item
+    has_new = "count" in item
+    if expect_old and has_new:
+        return (
+            f"[ERROR] {rel}: entity {entity_id} has new-format item in {slot_desc}"
+            f" (min target version is {min_version_name}, pre-1.20.5 clients will misread it)"
+        )
+    if not expect_old and has_old:
+        return (
+            f"[ERROR] {rel}: entity {entity_id} has old-format item in {slot_desc}"
+            f" (min target version is {min_version_name}, expected new item format)"
+        )
+    return None
+
+
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
     namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
     structures_dir = data_dir(namespace_root, "structure")
@@ -58,6 +77,9 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
     max_allowed_dv: int | None = None
     max_version_name: str | None = None
+    min_allowed_dv: int | None = None
+    min_version_name: str | None = None
+
     if version_map:
         for v in ctx.mc_versions:
             dv = version_map.get(v)
@@ -67,7 +89,18 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             if max_allowed_dv is None or dv > max_allowed_dv:
                 max_allowed_dv = dv
                 max_version_name = v
+            if min_allowed_dv is None or dv < min_allowed_dv:
+                min_allowed_dv = dv
+                min_version_name = v
 
+    if min_allowed_dv is None:
+        item_check_mode: str | None = None
+    elif min_allowed_dv < _NEW_FORMAT_BOUNDARY_DV:
+        item_check_mode = "old"  # expect old format; new-format items are errors
+    else:
+        item_check_mode = "new"  # expect new format; old-format items are errors
+
+    warnings: list[str] = []
     errors: list[str] = []
     files_checked = 0
     entities_checked = 0
@@ -90,8 +123,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                     dv_version_name = next(
                         (k for k, v in version_map.items() if v == dv), str(dv)
                     )
-                    errors.append(
-                        f"[ERROR] {rel}: DataVersion {dv} ({dv_version_name}) exceeds max allowed"
+                    warnings.append(
+                        f"[WARN] {rel}: DataVersion {dv} ({dv_version_name}) exceeds max allowed"
                         f" {max_allowed_dv} ({max_version_name}) — structure was saved in a newer game version"
                     )
 
@@ -104,15 +137,40 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                 continue
             entity_id = str(id_tag)
             entities_checked += 1
+
             if not _is_valid(entity_id, ctx.valid_entities, ctx.extra_ids):
                 errors.append(f"[ERROR] {rel}: unknown entity ID '{entity_id}'")
 
+            if item_check_mode is not None:
+                expect_old = item_check_mode == "old"
+                for list_field in ("HandItems", "ArmorItems"):
+                    items_tag = entity_nbt.get(list_field)
+                    if items_tag is None:
+                        continue
+                    for slot, item in enumerate(items_tag):
+                        if not isinstance(item, nbtlib.Compound):
+                            continue
+                        msg = _check_item_format(item, f"{list_field} slot {slot}", entity_id, rel, expect_old, min_version_name)
+                        if msg:
+                            errors.append(msg)
+                body_item = entity_nbt.get("body_armor_item")
+                if isinstance(body_item, nbtlib.Compound):
+                    msg = _check_item_format(body_item, "body_armor_item", entity_id, rel, expect_old, min_version_name)
+                    if msg:
+                        errors.append(msg)
+
+    for msg in warnings:
+        print(f"  {msg}")
     for msg in errors:
         print(f"  {msg}")
 
-    if not errors:
+    if not warnings and not errors:
         print(f"  {files_checked} file(s), {entities_checked} entity ID(s) checked — all valid")
 
     if errors:
-        return False, f"{len(errors)} error(s)"
+        w = len(warnings)
+        e = len(errors)
+        return False, f"{w} warning(s), {e} error(s)"
+    if warnings:
+        return True, f"{len(warnings)} warning(s), 0 errors"
     return True, f"{files_checked} files, {entities_checked} entities checked"
