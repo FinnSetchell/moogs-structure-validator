@@ -60,6 +60,7 @@ def run_checks(ctx: ValidatorContext) -> list[tuple[str, bool, str]]:
     import checks.check_registries as check_registries
     import checks.check_worldgen_schemas as check_worldgen_schemas
     import checks.check_entity_nbt as check_entity_nbt
+    import checks.check_biome_tags as check_biome_tags
 
     check_modules = [
         ("check_directory_names", check_directory_names),
@@ -70,6 +71,7 @@ def run_checks(ctx: ValidatorContext) -> list[tuple[str, bool, str]]:
         ("check_registries", check_registries),
         ("check_worldgen_schemas", check_worldgen_schemas),
         ("check_entity_nbt", check_entity_nbt),
+        ("check_biome_tags", check_biome_tags),
     ]
 
     results: list[tuple[str, bool, str]] = []
