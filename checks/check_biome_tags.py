@@ -59,7 +59,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     tag_files: list[tuple[Path, list]] = []
     for json_path in sorted(biome_tags_dir.rglob("*.json")):
         try:
-            with json_path.open() as f:
+            with json_path.open(encoding="utf-8-sig") as f:
                 data = json.load(f)
         except Exception as e:
             print(f"  [WARN] could not parse {json_path.name}: {e}")

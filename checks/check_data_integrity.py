@@ -21,7 +21,7 @@ def _loc_to_path(location: str, namespace: str, base_dir: Path, ext: str) -> Pat
 
 def _load_json(path: Path) -> dict | None:
     try:
-        with path.open(encoding="utf-8") as f:
+        with path.open(encoding="utf-8-sig") as f:
             return json.load(f)
     except Exception as e:
         print(f"  [ERROR] Could not read {path.name}: {e}")

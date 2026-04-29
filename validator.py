@@ -51,6 +51,18 @@ def _banner(title: str) -> None:
     print(f"\n--- {title} {tail}")
 
 
+def _strip_bom_files(project_root: Path) -> int:
+    data_root = project_root / "src" / "main" / "resources" / "data"
+    if not data_root.exists():
+        return 0
+    fixed = 0
+    for json_path in data_root.rglob("*.json"):
+        raw = json_path.read_bytes()
+        if raw[:3] == b"\xef\xbb\xbf":
+            json_path.write_bytes(raw[3:])
+            fixed += 1
+    return fixed
+
 def run_checks(ctx: ValidatorContext) -> list[tuple[str, bool, str]]:
     import checks.check_directory_names as check_directory_names
     import checks.nbt_check as nbt_check
@@ -136,6 +148,10 @@ def main() -> None:
     print(f"Loading registries ({versions_str})...")
     ctx.valid_items, ctx.valid_blocks, ctx.valid_entities = fetch_registries(ctx.mc_versions, cache_dir, ctx.refresh)
     print(f"  {len(ctx.valid_items)} items, {len(ctx.valid_blocks)} blocks, {len(ctx.valid_entities)} entities")
+
+    bom_fixed = _strip_bom_files(ctx.project_root)
+    if bom_fixed:
+        print(f"  [pre-pass] stripped UTF-8 BOM from {bom_fixed} file(s)")
 
     results = run_checks(ctx)
     _print_summary(results)

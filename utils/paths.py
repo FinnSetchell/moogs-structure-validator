@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 _PLURAL_FORMS = {
@@ -15,6 +16,11 @@ _PLURAL_FORMS = {
     "tags/game_event": "tags/game_events",
     "tags/function":   "tags/functions",
 }
+
+
+def load_json(path: Path) -> dict:
+    with path.open(encoding="utf-8-sig") as f:
+        return json.load(f)
 
 
 def data_dir(namespace_root: Path, name: str) -> Path:

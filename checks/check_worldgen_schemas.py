@@ -50,7 +50,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         for json_path in files:
             rel = json_path.relative_to(worldgen_dir)
             try:
-                with json_path.open() as f:
+                with json_path.open(encoding="utf-8-sig") as f:
                     data = json.load(f)
             except json.JSONDecodeError as e:
                 print(f"  [{subdir}] {rel} — invalid JSON: {e}")
