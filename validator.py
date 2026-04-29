@@ -20,6 +20,7 @@ class ValidatorContext:
     extra_ids: set[str] = field(default_factory=set)
     valid_blocks: set[str] = field(default_factory=set)
     valid_items: set[str] = field(default_factory=set)
+    valid_entities: set[str] = field(default_factory=set)
 
 
 def resolve_extra_ids(raw: list[str], project_root: Path) -> set[str]:
@@ -58,6 +59,7 @@ def run_checks(ctx: ValidatorContext) -> list[tuple[str, bool, str]]:
     import checks.check_loot_table_schemas as check_loot_table_schemas
     import checks.check_registries as check_registries
     import checks.check_worldgen_schemas as check_worldgen_schemas
+    import checks.check_entity_nbt as check_entity_nbt
 
     check_modules = [
         ("check_directory_names", check_directory_names),
@@ -67,6 +69,7 @@ def run_checks(ctx: ValidatorContext) -> list[tuple[str, bool, str]]:
         ("check_loot_table_schemas", check_loot_table_schemas),
         ("check_registries", check_registries),
         ("check_worldgen_schemas", check_worldgen_schemas),
+        ("check_entity_nbt", check_entity_nbt),
     ]
 
     results: list[tuple[str, bool, str]] = []
@@ -129,8 +132,8 @@ def main() -> None:
     cache_dir.mkdir(exist_ok=True)
 
     print(f"Loading registries ({versions_str})...")
-    ctx.valid_items, ctx.valid_blocks = fetch_registries(ctx.mc_versions, cache_dir, ctx.refresh)
-    print(f"  {len(ctx.valid_items)} items, {len(ctx.valid_blocks)} blocks")
+    ctx.valid_items, ctx.valid_blocks, ctx.valid_entities = fetch_registries(ctx.mc_versions, cache_dir, ctx.refresh)
+    print(f"  {len(ctx.valid_items)} items, {len(ctx.valid_blocks)} blocks, {len(ctx.valid_entities)} entities")
 
     results = run_checks(ctx)
     _print_summary(results)

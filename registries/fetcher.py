@@ -25,16 +25,19 @@ def _fetch_version(version: str, cache_dir: pathlib.Path, refresh: bool) -> dict
 
 def fetch_registries(
     mc_versions: list[str], cache_dir: pathlib.Path, refresh: bool
-) -> tuple[set[str], set[str]]:
+) -> tuple[set[str], set[str], set[str]]:
     items_per_version: list[set[str]] = []
     blocks_per_version: list[set[str]] = []
+    entities_per_version: list[set[str]] = []
 
     for version in mc_versions:
         data = _fetch_version(version, cache_dir, refresh)
         items_per_version.append({"minecraft:" + n for n in data.get("item", [])})
         blocks_per_version.append({"minecraft:" + n for n in data.get("block", [])})
+        entities_per_version.append({"minecraft:" + n for n in data.get("entity_type", [])})
 
     valid_items = set().union(*items_per_version) if items_per_version else set()
     valid_blocks = set().union(*blocks_per_version) if blocks_per_version else set()
+    valid_entities = set().union(*entities_per_version) if entities_per_version else set()
 
-    return valid_items, valid_blocks
+    return valid_items, valid_blocks, valid_entities
