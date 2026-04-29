@@ -119,6 +119,49 @@ def _check_set_to_structure(
     return errors
 
 
+def _check_pool_fallbacks(ctx: ValidatorContext, namespace_root: Path) -> list[str]:
+    template_pool_dir = namespace_root / "worldgen" / "template_pool"
+    if not template_pool_dir.exists():
+        return []
+    errors = []
+    for json_path in sorted(template_pool_dir.rglob("*.json")):
+        data = _load_json(json_path)
+        if data is None:
+            continue
+        fallback = data.get("fallback")
+        if not isinstance(fallback, str) or ":" not in fallback:
+            continue
+        fallback_ns, fallback_path = fallback.split(":", 1)
+        if fallback_ns == "minecraft":
+            continue
+        if fallback_ns != ctx.namespace:
+            continue
+        expected = template_pool_dir / (fallback_path + ".json")
+        if not expected.exists():
+            rel = json_path.relative_to(template_pool_dir)
+            errors.append(f"{rel}  ->  fallback '{fallback}'  (pool not found)")
+    return errors
+
+
+def _check_msl_element_key(ctx: ValidatorContext, namespace_root: Path) -> list[str]:
+    template_pool_dir = namespace_root / "worldgen" / "template_pool"
+    if not template_pool_dir.exists():
+        return []
+    errors = []
+    for file in sorted(template_pool_dir.rglob("*.json")):
+        data = _load_json(file)
+        if data is None:
+            continue
+        for entry in data.get("elements", []):
+            target = entry.get("element", entry)
+            value = target.get("type", "")
+            if value.startswith("moogs_structures:"):
+                errors.append(
+                    f'  [ERROR] {file.name}: element uses "type" for {value!r} — must use "element_type" instead'
+                )
+    return errors
+
+
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
     namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
     structures_dir = _data_dir(namespace_root, "structure")
@@ -136,39 +179,57 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
     errors = _check_pool_to_nbt(template_pool_dir, structures_dir, ctx.namespace)
     if errors:
-        print(f"  [1/4] Pool -> NBT        {len(errors)} missing:")
+        print(f"  [1/6] Pool -> NBT        {len(errors)} missing:")
         for e in errors:
             print(f"          {e}")
         failed = True
     else:
-        print(f"  [1/4] Pool -> NBT        OK")
+        print(f"  [1/6] Pool -> NBT        OK")
 
     orphans = _check_orphaned_nbt(template_pool_dir, structures_dir, ctx.namespace)
     orphan_count = len(orphans)
     if orphans:
-        print(f"  [2/4] Orphaned NBT       {orphan_count} unreferenced:")
+        print(f"  [2/6] Orphaned NBT       {orphan_count} unreferenced:")
         for o in orphans:
             print(f"          {o}")
     else:
-        print(f"  [2/4] Orphaned NBT       OK")
+        print(f"  [2/6] Orphaned NBT       OK")
 
     errors = _check_structure_to_pool(worldgen_structure_dir, template_pool_dir, ctx.namespace)
     if errors:
-        print(f"  [3/4] Structure -> Pool  {len(errors)} missing:")
+        print(f"  [3/6] Structure -> Pool  {len(errors)} missing:")
         for e in errors:
             print(f"          {e}")
         failed = True
     else:
-        print(f"  [3/4] Structure -> Pool  OK")
+        print(f"  [3/6] Structure -> Pool  OK")
 
     errors = _check_set_to_structure(structure_set_dir, worldgen_structure_dir, ctx.namespace)
     if errors:
-        print(f"  [4/4] Set -> Structure   {len(errors)} missing:")
+        print(f"  [4/6] Set -> Structure   {len(errors)} missing:")
         for e in errors:
             print(f"          {e}")
         failed = True
     else:
-        print(f"  [4/4] Set -> Structure   OK")
+        print(f"  [4/6] Set -> Structure   OK")
+
+    fallback_errors = _check_pool_fallbacks(ctx, namespace_root)
+    if fallback_errors:
+        print(f"  [5/6] Pool fallbacks     {len(fallback_errors)} missing:")
+        for e in fallback_errors:
+            print(f"          {e}")
+        failed = True
+    else:
+        print(f"  [5/6] Pool fallbacks     OK")
+
+    msl_key_errors = _check_msl_element_key(ctx, namespace_root)
+    if msl_key_errors:
+        print(f"  [6/6] MSL element keys   {len(msl_key_errors)} bad:")
+        for e in msl_key_errors:
+            print(e)
+        failed = True
+    else:
+        print(f"  [6/6] MSL element keys   OK")
 
     if failed:
         summary = "cross-reference errors found"
