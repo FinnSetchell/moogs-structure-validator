@@ -78,20 +78,30 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             continue
         _collect_ids(data, all_items, all_blocks)
 
+    cache_dir = Path(__file__).parent.parent / "cache"
+    global_min_version = min(ctx.mc_versions, key=_parse_version)
+
+    lt_vdata = _fetch_version(global_min_version, cache_dir, ctx.refresh)
+    valid_items_min = (
+        {"minecraft:" + n for n in lt_vdata.get("item", [])}
+        | {i for i in ctx.valid_items if not i.startswith("minecraft:")}
+    )
+    valid_blocks_min = (
+        {"minecraft:" + n for n in lt_vdata.get("block", [])}
+        | {b for b in ctx.valid_blocks if not b.startswith("minecraft:")}
+    )
+
     unknown_items = sorted(
-        id_ for id_ in all_items if not _is_valid(id_, ctx.valid_items, ctx.extra_ids)
+        id_ for id_ in all_items if not _is_valid(id_, valid_items_min, ctx.extra_ids)
     )
     unknown_blocks = sorted(
-        id_ for id_ in all_blocks if not _is_valid(id_, ctx.valid_blocks, ctx.extra_ids)
+        id_ for id_ in all_blocks if not _is_valid(id_, valid_blocks_min, ctx.extra_ids)
     )
 
     # NBT palette scan — grouped by block ID
     structure_dir = data_dir(namespace_root, "structure")
     template_pool_dir = namespace_root / "worldgen" / "template_pool"
-    cache_dir = Path(__file__).parent.parent / "cache"
     by_block: dict[str, list[str]] = defaultdict(list)
-
-    global_min_version = min(ctx.mc_versions, key=_parse_version)
     nbt_min_versions: dict[Path, str] = {}
     if template_pool_dir.exists():
         nbt_min_versions = _build_nbt_min_versions(
