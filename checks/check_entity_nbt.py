@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 import nbtlib
 
+from registries.fetcher import _fetch_version
+from utils.nbt_versions import _build_nbt_min_versions, _parse_version
 from utils.paths import data_dir
 
 if TYPE_CHECKING:
@@ -96,9 +98,19 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     if min_allowed_dv is None:
         item_check_mode: str | None = None
     elif min_allowed_dv < _NEW_FORMAT_BOUNDARY_DV:
-        item_check_mode = "old"  # expect old format; new-format items are errors
+        item_check_mode = "old"
     else:
-        item_check_mode = "new"  # expect new format; old-format items are errors
+        item_check_mode = "new"
+
+    template_pool_dir = namespace_root / "worldgen" / "template_pool"
+    global_min_version = min(ctx.mc_versions, key=_parse_version)
+    nbt_min_versions: dict[Path, str] = {}
+    if template_pool_dir.exists():
+        nbt_min_versions = _build_nbt_min_versions(
+            template_pool_dir, structures_dir, ctx.namespace, global_min_version
+        )
+    non_minecraft_valid_entities = {e for e in ctx.valid_entities if not e.startswith("minecraft:")}
+    version_entity_cache: dict[str, set[str]] = {}
 
     warnings: list[str] = []
     errors: list[str] = []
@@ -114,6 +126,22 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
         files_checked += 1
         rel = nbt_path.name
+
+        file_version = nbt_min_versions.get(nbt_path, global_min_version)
+
+        if file_version not in version_entity_cache:
+            vdata = _fetch_version(file_version, cache_dir, ctx.refresh)
+            version_entity_cache[file_version] = (
+                {"minecraft:" + n for n in vdata.get("entity_type", [])}
+                | non_minecraft_valid_entities
+            )
+        valid_entities_for_file = version_entity_cache[file_version]
+
+        file_dv = version_map.get(file_version)
+        if file_dv is not None:
+            file_item_mode = "old" if file_dv < _NEW_FORMAT_BOUNDARY_DV else "new"
+        else:
+            file_item_mode = item_check_mode  # fallback to global if version not in map
 
         if max_allowed_dv is not None:
             dv_tag = nbt.get("DataVersion")
@@ -138,11 +166,11 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             entity_id = str(id_tag)
             entities_checked += 1
 
-            if not _is_valid(entity_id, ctx.valid_entities, ctx.extra_ids):
+            if not _is_valid(entity_id, valid_entities_for_file, ctx.extra_ids):
                 errors.append(f"[ERROR] {rel}: unknown entity ID '{entity_id}'")
 
-            if item_check_mode is not None:
-                expect_old = item_check_mode == "old"
+            if file_item_mode is not None:
+                expect_old = file_item_mode == "old"
                 for list_field in ("HandItems", "ArmorItems"):
                     items_tag = entity_nbt.get(list_field)
                     if items_tag is None:
