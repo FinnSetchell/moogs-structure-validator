@@ -1,0 +1,96 @@
+{
+  "vanilla": {
+    "1.20.x": {
+      "versions": ["1.20", "1.20.1", "1.20.2", "1.20.3", "1.20.4", "1.20.5", "1.20.6"],
+      "repository": "misode/mcmeta",
+      "path": "data/minecraft/tags/worldgen/biome",
+      "ref": "5cf70b97ada33689206e4b97d4a08d49fb067cb1",
+      "link": "https://github.com/misode/mcmeta/tree/5cf70b97ada33689206e4b97d4a08d49fb067cb1/data/minecraft/tags/worldgen/biome"
+    },
+    "1.21.0-1.21.5": {
+      "versions": ["1.21", "1.21.1", "1.21.2", "1.21.3", "1.21.4", "1.21.5"],
+      "repository": "misode/mcmeta",
+      "path": "data/minecraft/tags/worldgen/biome",
+      "ref": "0b09115312475ff6f2758800f4adb77ae2f5d936",
+      "link": "https://github.com/misode/mcmeta/tree/0b09115312475ff6f2758800f4adb77ae2f5d936/data/minecraft/tags/worldgen/biome"
+    },
+    "1.21.8-1.21.10": {
+      "versions": ["1.21.8", "1.21.9", "1.21.10"],
+      "repository": "misode/mcmeta",
+      "path": "data/minecraft/tags/worldgen/biome",
+      "ref": "0a6465c6651347bcb9f3c620ba4fff7241791b20",
+      "link": "https://github.com/misode/mcmeta/tree/0a6465c6651347bcb9f3c620ba4fff7241791b20/data/minecraft/tags/worldgen/biome"
+    },
+    "1.21.11": {
+      "versions": ["1.21.11"],
+      "repository": "misode/mcmeta",
+      "path": "data/minecraft/tags/worldgen/biome",
+      "ref": "3926dfaf527cbf692f161ef8f7cdad17a1a06b74",
+      "link": "https://github.com/misode/mcmeta/tree/3926dfaf527cbf692f161ef8f7cdad17a1a06b74/data/minecraft/tags/worldgen/biome"
+    }
+  },
+  "forge": {
+    "1.20.1": {
+      "versions": ["1.20", "1.20.1"],
+      "repository": "MinecraftForge/MinecraftForge",
+      "path": "src/generated/resources/data/forge/tags/worldgen/biome",
+      "ref": "1.20.1",
+      "link": "https://github.com/MinecraftForge/MinecraftForge/tree/1.20.1/src/generated/resources/data/forge/tags/worldgen/biome"
+    },
+    "1.20.4": {
+      "versions": ["1.20.2", "1.20.3", "1.20.4"],
+      "repository": "MinecraftForge/MinecraftForge",
+      "path": "src/main/generated/data/forge/tags/worldgen/biome",
+      "ref": "1.20.4",
+      "link": "https://github.com/MinecraftForge/MinecraftForge/tree/1.20.4/src/main/generated/data/forge/tags/worldgen/biome"
+    },
+    "1.21.x": {
+      "versions": ["1.21", "1.21.1", "1.21.2", "1.21.3", "1.21.4", "1.21.5", "1.21.8", "1.21.10", "1.21.11"],
+      "repository": "MinecraftForge/MinecraftForge",
+      "path": "src/main/generated/data/c/tags/worldgen/biome",
+      "ref": "1.21.1",
+      "link": "https://github.com/MinecraftForge/MinecraftForge/tree/1.21.1/src/main/generated/data/c/tags/worldgen/biome"
+    }
+  },
+  "neoforge": {
+    "1.20.1-1.20.4": {
+      "versions": ["1.20.1", "1.20.2", "1.20.4"],
+      "repository": "neoforged/NeoForge",
+      "path": "src/generated/resources/data/forge/tags/worldgen/biome",
+      "ref": "1.20.1",
+      "link": "https://github.com/neoforged/NeoForge/tree/1.20.1/src/generated/resources/data/forge/tags/worldgen/biome"
+    },
+    "1.20.6": {
+      "versions": ["1.20.6"],
+      "repository": "neoforged/NeoForge",
+      "path": "src/generated/resources/data/c/tags/worldgen/biome",
+      "ref": "1.20.6",
+      "link": "https://github.com/neoforged/NeoForge/tree/1.20.6/src/generated/resources/data/c/tags/worldgen/biome"
+    },
+    "1.21.x": {
+      "versions": ["1.21", "1.21.1", "1.21.2", "1.21.3", "1.21.4", "1.21.5", "1.21.8", "1.21.10", "1.21.11"],
+      "repository": "neoforged/NeoForge",
+      "path": "src/generated/resources/data/c/tags/worldgen/biome",
+      "ref": "1.21.1",
+      "link": "https://github.com/neoforged/NeoForge/tree/1.21.1/src/generated/resources/data/c/tags/worldgen/biome"
+    }
+  },
+  "fabric": {
+    "1.20.x": {
+      "versions": ["1.20", "1.20.1", "1.20.2", "1.20.3", "1.20.4", "1.20.5", "1.20.6"],
+      "repository": "FabricMC/fabric-api",
+      "path": "fabric-convention-tags-v1/src/generated/resources/data/c/tags/worldgen/biome",
+      "ref": "1.20",
+      "tag_style": "unprefixed",
+      "link": "https://github.com/FabricMC/fabric-api/tree/1.20/fabric-convention-tags-v1/src/generated/resources/data/c/tags/worldgen/biome"
+    },
+    "1.21.x": {
+      "versions": ["1.21", "1.21.1", "1.21.2", "1.21.3", "1.21.4", "1.21.5", "1.21.8", "1.21.10", "1.21.11"],
+      "repository": "FabricMC/fabric-api",
+      "path": "fabric-convention-tags-v2/src/generated/resources/data/c/tags/worldgen/biome",
+      "ref": "1.21.1",
+      "tag_style": "is_prefixed",
+      "link": "https://github.com/FabricMC/fabric-api/tree/1.21.1/fabric-convention-tags-v2/src/generated/resources/data/c/tags/worldgen/biome"
+    }
+  }
+}

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from utils.nbt_versions import _parse_version
 
 if TYPE_CHECKING:
     from validator import ValidatorContext
@@ -45,6 +48,139 @@ def _fetch_vanilla_biome_tags(version: str, cache_dir: Path, refresh: bool) -> s
             print(f"  [WARN] could not fetch biome tags for {version}: {e}")
             return set()
     return {f"minecraft:{key}" for key in data}
+
+
+def _namespace_from_path(path: str) -> str:
+    m = re.search(r'/data/([^/]+)/tags/', path)
+    return m.group(1) if m else ""
+
+
+def _fetch_loader_tag_set(
+    loader_name: str,
+    range_key: str,
+    entry: dict,
+    cache_dir: Path,
+    refresh: bool,
+    run_cache: dict[str, set[str]],
+) -> set[str]:
+    cache_key = f"{loader_name}/{range_key}"
+    if cache_key in run_cache:
+        return run_cache[cache_key]
+
+    repo = entry["repository"]
+    ref = entry["ref"]
+    path = entry["path"]
+    sanitised_repo = repo.replace("/", "-")
+    cache_file = cache_dir / f"loader-{sanitised_repo}-{ref[:16]}.json"
+
+    if cache_file.exists() and not refresh:
+        with cache_file.open() as f:
+            names = json.load(f)
+    else:
+        url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={ref}"
+        req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+        try:
+            with urllib.request.urlopen(req) as resp:
+                items = json.loads(resp.read().decode())
+            names = [
+                item["name"][:-5]
+                for item in items
+                if item.get("type") == "file" and item.get("name", "").endswith(".json")
+            ]
+            with cache_file.open("w") as f:
+                json.dump(names, f)
+        except Exception as e:
+            print(f"  [WARN] could not fetch loader tags for {loader_name} {range_key}: {e}")
+            run_cache[cache_key] = set()
+            return set()
+
+    tag_set = set(names)
+    run_cache[cache_key] = tag_set
+    return tag_set
+
+
+def _check_loader_tag_existence(
+    tag_files: list[tuple[Path, list]],
+    min_version: str,
+    cache_dir: Path,
+    refresh: bool,
+) -> list[str]:
+    map_path = Path(__file__).parent.parent / "data" / "biome_tag_map.json"
+    with map_path.open(encoding="utf-8") as f:
+        biome_tag_map: dict[str, dict[str, dict]] = json.load(f)
+
+    run_cache: dict[str, set[str]] = {}
+    warnings: list[str] = []
+
+    # Collect all unique loader tag references across all files
+    tag_occurrences: dict[str, list[str]] = {}  # tag_ref -> list of filenames
+    for json_path, values in tag_files:
+        for entry in values:
+            tag_ref: str | None = None
+            if isinstance(entry, str) and entry.startswith("#"):
+                tag_ref = entry[1:]
+            elif isinstance(entry, dict):
+                id_val = entry.get("id", "")
+                if isinstance(id_val, str) and id_val.startswith("#"):
+                    tag_ref = id_val[1:]
+            if tag_ref and ":" in tag_ref:
+                ns = tag_ref.split(":")[0]
+                if ns in _LOADER_NAMESPACES:
+                    if tag_ref not in tag_occurrences:
+                        tag_occurrences[tag_ref] = []
+                    tag_occurrences[tag_ref].append(json_path.name)
+
+    for tag_ref, file_names in tag_occurrences.items():
+        tag_ns, tag_path = tag_ref.split(":", 1)
+
+        # Find all map entries (across all loaders) that serve this namespace for min_version
+        matching: list[tuple[str, str, dict]] = []  # (loader_name, range_key, entry)
+        for loader_name, ranges in biome_tag_map.items():
+            if loader_name == "vanilla":
+                continue
+            for range_key, entry in ranges.items():
+                if (
+                    _namespace_from_path(entry["path"]) == tag_ns
+                    and min_version in entry.get("versions", [])
+                ):
+                    matching.append((loader_name, range_key, entry))
+
+        if not matching:
+            continue
+
+        found_in: list[str] = []
+        missing_in: list[tuple[str, str, dict]] = []
+
+        for loader_name, range_key, entry in matching:
+            tag_set = _fetch_loader_tag_set(loader_name, range_key, entry, cache_dir, refresh, run_cache)
+            tag_style = entry.get("tag_style", "is_prefixed")
+
+            if tag_style == "unprefixed":
+                found = tag_path in tag_set or tag_path.removeprefix("is_") in tag_set
+            else:
+                found = tag_path in tag_set
+
+            if found:
+                found_in.append(loader_name)
+            else:
+                missing_in.append((loader_name, range_key, entry))
+
+        file_label = file_names[0]
+
+        if not found_in and missing_in:
+            loader_ns_label = tag_ns
+            warnings.append(
+                f"[WARN] {file_label}: #{tag_ns}:{tag_path} not found in any {loader_ns_label}: loader for {min_version}"
+            )
+        elif missing_in:
+            for loader_name, range_key, entry in missing_in:
+                msg = f"[WARN] {file_label}: #{tag_ns}:{tag_path} not found in {loader_name} {range_key}"
+                tag_style = entry.get("tag_style", "is_prefixed")
+                if tag_style == "unprefixed":
+                    msg += f" (Fabric API v1 uses unprefixed names — consider #c:{tag_path.removeprefix('is_')})"
+                warnings.append(msg)
+
+    return warnings
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
@@ -121,7 +257,15 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     for msg in errors:
         print(f"  {msg}")
 
+    # Phase 2: loader tag existence (warnings only, do not affect pass/fail)
+    loader_warnings: list[str] = []
+    if min_version:
+        loader_warnings = _check_loader_tag_existence(tag_files, min_version, cache_dir, ctx.refresh)
+        for msg in loader_warnings:
+            print(f"  {msg}")
+
     n_files = len(tag_files)
+    summary_suffix = f", {len(loader_warnings)} loader tag warning(s)" if loader_warnings else ""
     if errors:
-        return False, f"{len(errors)} error(s)"
-    return True, f"{n_files} files checked"
+        return False, f"{len(errors)} error(s){summary_suffix}"
+    return True, f"{n_files} files checked{summary_suffix}"
