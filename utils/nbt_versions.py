@@ -16,7 +16,8 @@ def _build_nbt_min_versions(
     namespace: str,
     global_min_version: str,
 ) -> dict[Path, str]:
-    result: dict[Path, tuple[int, ...]] = {}
+    versioned: dict[Path, tuple[int, ...]] = {}
+    unversioned: set[Path] = set()
 
     for json_path in sorted(template_pool_dir.rglob("*.json")):
         try:
@@ -35,13 +36,19 @@ def _build_nbt_min_versions(
                     if nbt_path is None:
                         continue
                     parsed = _parse_version(lower)
-                    if nbt_path not in result or parsed < result[nbt_path]:
-                        result[nbt_path] = parsed
+                    if nbt_path not in versioned or parsed < versioned[nbt_path]:
+                        versioned[nbt_path] = parsed
             else:
                 loc = element.get("location")
                 if loc:
                     nbt_path = _loc_to_path(loc, namespace, structures_dir, ".nbt")
-                    if nbt_path is not None and nbt_path not in result:
-                        result[nbt_path] = _parse_version(global_min_version)
+                    if nbt_path is not None:
+                        unversioned.add(nbt_path)
+
+    result: dict[Path, tuple[int, ...]] = dict(versioned)
+    global_parsed = _parse_version(global_min_version)
+    for nbt_path in unversioned:
+        if nbt_path not in result:
+            result[nbt_path] = global_parsed
 
     return {p: ".".join(str(x) for x in v) for p, v in result.items()}
