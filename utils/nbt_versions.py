@@ -10,11 +10,20 @@ def _parse_version(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in v.split("."))
 
 
+def _version_in_range(version: str, range_key: str) -> bool:
+    parts = range_key.split("-")
+    v = _parse_version(version)
+    if len(parts) == 1:
+        return v == _parse_version(parts[0])
+    return _parse_version(parts[0]) <= v <= _parse_version(parts[1])
+
+
 def _build_nbt_min_versions(
     template_pool_dir: Path,
     structures_dir: Path,
     namespace: str,
     global_min_version: str,
+    mc_versions: list[str] | None = None,
 ) -> dict[Path, str]:
     versioned: dict[Path, tuple[int, ...]] = {}
     unversioned: set[Path] = set()
@@ -30,7 +39,8 @@ def _build_nbt_min_versions(
             element = entry.get("element", {})
             el_type = element.get("element_type") or element.get("type", "")
             if el_type == "moogs_structures:versioned_single_pool_element":
-                for range_key, loc in element.get("locations", {}).items():
+                locations_dict = element.get("locations", {})
+                for range_key, loc in locations_dict.items():
                     lower = range_key.split("-")[0]
                     nbt_path = _loc_to_path(loc, namespace, structures_dir, ".nbt")
                     if nbt_path is None:
@@ -38,6 +48,22 @@ def _build_nbt_min_versions(
                     parsed = _parse_version(lower)
                     if nbt_path not in versioned or parsed < versioned[nbt_path]:
                         versioned[nbt_path] = parsed
+
+                # The top-level "location" field is the default used for any
+                # version not covered by a range in "locations"
+                default_loc = element.get("location")
+                if default_loc and mc_versions:
+                    nbt_path = _loc_to_path(default_loc, namespace, structures_dir, ".nbt")
+                    if nbt_path is not None:
+                        uncovered = [
+                            v for v in mc_versions
+                            if not any(_version_in_range(v, rk) for rk in locations_dict)
+                        ]
+                        if uncovered:
+                            min_uncovered = min(uncovered, key=_parse_version)
+                            parsed = _parse_version(min_uncovered)
+                            if nbt_path not in versioned or parsed < versioned[nbt_path]:
+                                versioned[nbt_path] = parsed
             else:
                 loc = element.get("location")
                 if loc:

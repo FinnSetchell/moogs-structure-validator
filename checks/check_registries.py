@@ -105,7 +105,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     nbt_min_versions: dict[Path, str] = {}
     if template_pool_dir.exists():
         nbt_min_versions = _build_nbt_min_versions(
-            template_pool_dir, structure_dir, ctx.namespace, global_min_version
+            template_pool_dir, structure_dir, ctx.namespace, global_min_version, ctx.mc_versions
         )
 
     non_minecraft_valid = {id_ for id_ in ctx.valid_blocks if not id_.startswith("minecraft:")}

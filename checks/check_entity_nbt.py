@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -107,12 +108,12 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     nbt_min_versions: dict[Path, str] = {}
     if template_pool_dir.exists():
         nbt_min_versions = _build_nbt_min_versions(
-            template_pool_dir, structures_dir, ctx.namespace, global_min_version
+            template_pool_dir, structures_dir, ctx.namespace, global_min_version, ctx.mc_versions
         )
     non_minecraft_valid_entities = {e for e in ctx.valid_entities if not e.startswith("minecraft:")}
     version_entity_cache: dict[str, set[str]] = {}
 
-    warnings: list[str] = []
+    dv_outdated: dict[tuple[int, str], list[str]] = defaultdict(list)
     errors: list[str] = []
     files_checked = 0
     entities_checked = 0
@@ -151,10 +152,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                     dv_version_name = next(
                         (k for k, v in version_map.items() if v == dv), str(dv)
                     )
-                    warnings.append(
-                        f"[WARN] {rel}: DataVersion {dv} ({dv_version_name}) exceeds max allowed"
-                        f" {max_allowed_dv} ({max_version_name}) — structure was saved in a newer game version"
-                    )
+                    dv_outdated[(dv, dv_version_name)].append(rel)
 
         for entity_entry in nbt.get("entities") or []:
             entity_nbt = entity_entry.get("nbt")
@@ -187,18 +185,25 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                     if msg:
                         errors.append(msg)
 
-    for msg in warnings:
-        print(f"  {msg}")
+    if dv_outdated:
+        total_outdated = sum(len(v) for v in dv_outdated.values())
+        print(f"  DataVersions: {total_outdated} file(s) saved in newer game versions (max allowed: {max_version_name}/{max_allowed_dv}):")
+        dv_w = max(len(name) for _, name in dv_outdated) + 2
+        for (dv, dv_version_name), files in sorted(dv_outdated.items()):
+            shown = ", ".join(files[:3])
+            suffix = f"  (+ {len(files) - 3} more)" if len(files) > 3 else ""
+            count = f"{len(files)} file" + ("s" if len(files) != 1 else "")
+            print(f"    {dv_version_name:<{dv_w}} (dv {dv})  {count}: {shown}{suffix}")
+
     for msg in errors:
         print(f"  {msg}")
 
-    if not warnings and not errors:
+    if not dv_outdated and not errors:
         print(f"  {files_checked} file(s), {entities_checked} entity ID(s) checked — all valid")
 
+    n_outdated = sum(len(v) for v in dv_outdated.values())
     if errors:
-        w = len(warnings)
-        e = len(errors)
-        return False, f"{w} warning(s), {e} error(s)"
-    if warnings:
-        return True, f"{len(warnings)} warning(s), 0 errors"
+        return False, f"{n_outdated} warning(s), {len(errors)} error(s)"
+    if dv_outdated:
+        return True, f"{n_outdated} warning(s), 0 errors"
     return True, f"{files_checked} files, {entities_checked} entities checked"
