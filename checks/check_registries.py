@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import nbtlib
 
+from checks.check_data_integrity import _check_orphaned_nbt
 from registries.fetcher import _fetch_version
 from registries.version_probe import find_version_added
 from utils.nbt_versions import _build_nbt_min_versions, _parse_version
@@ -111,8 +112,17 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     non_minecraft_valid = {id_ for id_ in ctx.valid_blocks if not id_.startswith("minecraft:")}
     version_block_cache: dict[str, set[str]] = {}
 
+    orphaned: set[Path] = set()
+    if structure_dir.exists() and template_pool_dir.exists():
+        orphaned = {
+            (structure_dir / rel).resolve()
+            for rel in _check_orphaned_nbt(template_pool_dir, structure_dir, ctx.namespace)
+        }
+
     if structure_dir.exists():
         for nbt_path in sorted(structure_dir.rglob("*.nbt")):
+            if nbt_path.resolve() in orphaned:
+                continue
             try:
                 nbt = nbtlib.load(str(nbt_path))
             except Exception:
