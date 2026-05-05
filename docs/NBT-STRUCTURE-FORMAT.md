@@ -128,9 +128,8 @@ contains 45 entries starting `["banner", "barrel", "beacon", "bed", "beehive",
 
 Mcmeta gap, important: there is no file in mcmeta that maps each block ID to
 "does this block carry a block entity". The `block_entity_type` registry
-lists block entity types, not the blocks that use them. The validator must
-maintain its own mapping from block ID to whether that block has a block
-entity (see section 14).
+lists block entity types, not the blocks that use them. See section 14 item 1
+for how the validator handles this gap.
 
 ### 1.2 Secondary: Minecraft Wiki
 
@@ -150,11 +149,15 @@ The wiki is a useful prose source but it is not authoritative for any field
 that has a concrete representation in mcmeta. When wiki and mcmeta disagree,
 mcmeta wins.
 
-### 1.3 Secondary: deepslate (parser behaviour)
+### 1.3 Tertiary: deepslate (reference only, not a dependency)
 
 `misode/deepslate` is a TypeScript library that reads structure NBT for
-rendering and editing. Its source is the closest thing to a reference
-parser. Citation tags:
+rendering and editing. It is cited in this doc only as a reference
+implementation for parser behaviour. It is not a runtime dependency of
+this validator (which is Python and uses `nbtlib` for binary parsing) and
+should not become one. See section 16 for the rationale.
+
+Citation tags used elsewhere in this doc:
 
 | Tag | Path |
 |---|---|
@@ -166,8 +169,7 @@ parser. Citation tags:
 Note on deepslate paths: structure related types live under `src/core/`, not
 `src/structure/`. deepslate's `Structure.fromNbt` only parses `size`,
 `palette`, and `blocks` (DS/Structure, the `fromNbt` static method). It does
-not parse `palettes`, `entities`, `DataVersion`, or `author`. That is a
-deepslate gap, not a spec gap; the validator must check all six.
+not parse `palettes`, `entities`, `DataVersion`, or `author`.
 
 ## 2. File location, encoding, compression
 
@@ -537,4 +539,300 @@ Version specific shape differences relevant to validation:
   (DataVersion 3463). For files claiming DataVersion < 3463, presence of
   `placement_priority` should warn. (JB; mcmeta version index.)
 * The data pack folder for structures is `structures/` on 1.20.x and
-  `structure/` from
+  `structure/` from 1.21 onward. See section 2.
+* `version` (root, always 1) was removed in 1.11 and `author` (root)
+  stopped being written in 1.13. Both are out of the 1.20+ scope; if
+  observed in a modern file they should warn, not fail.
+
+## 10. NBT primitive types
+
+Only the parts a structure validator needs (NBT):
+
+| ID | Name | Payload | Range |
+|---|---|---|---|
+| 0 | TAG_End | none | terminator inside a Compound |
+| 1 | TAG_Byte | 1 byte signed | -128..127. 0 / 1 used as boolean. |
+| 3 | TAG_Int | 4 bytes signed BE | -2,147,483,648..2,147,483,647 |
+| 4 | TAG_Long | 8 bytes signed BE | +/- 9.22e18 |
+| 5 | TAG_Float | IEEE 754 binary32 | finite floats |
+| 6 | TAG_Double | IEEE 754 binary64 | finite floats |
+| 8 | TAG_String | uint16 size + modified UTF-8 | up to 65,535 bytes |
+| 9 | TAG_List | type byte + int32 size + payloads | all entries share one type |
+| 10 | TAG_Compound | named tags + TAG_End | unique key per compound |
+| 11 | TAG_Int_Array | int32 size + ints | not used by the structure root |
+
+Limits the validator should encode:
+
+* Compound and list nesting depth must not exceed 512. `nbtlib` does not
+  enforce this; the game does.
+* Within a compound, every key must be unique. `nbtlib` keeps the last
+  occurrence silently; the game errors. Duplicate keys are a crash class.
+* List elements must all share one tag type. A list mixing
+  `TAG_String` and `TAG_Compound` is malformed.
+
+## 11. Coordinate conventions
+
+* All structure NBT positions are local. They are relative to the corner
+  toward `-X, -Y, -Z` (MW). At placement time the game adds the world
+  origin chosen by the structure block or jigsaw caller.
+* `size` is in blocks. The valid local range on each axis is
+  `[0, size[axis])`.
+* Entity `pos` is a double in world aligned blocks. It can be negative or
+  outside the size box but probably should not be.
+
+## 12. Validity constraints, consolidated
+
+A structure NBT file is well formed when all of the following hold:
+
+1. The file decompresses with gzip and the top level tag is a `TAG_Compound`.
+2. `DataVersion` is present, is `TAG_Int`, and falls inside the project's
+   target version range (section 9).
+3. `size` is `TAG_List` of exactly three `TAG_Int`, all non negative.
+4. Exactly one of `palette` and `palettes` is present.
+5. Every palette entry has `Name` (TAG_String, valid resource location).
+   `Properties`, when present, is a `TAG_Compound` of `TAG_String` values.
+6. With `palettes`: every inner palette has the same length.
+7. Every `blocks[i]` has `state` (`TAG_Int`, in palette range) and `pos`
+   (`TAG_List` of three `TAG_Int`, each in `[0, size[axis])`).
+8. `blocks[i].nbt`, when present, is a `TAG_Compound`, omits `x`, `y`, and
+   `z`, and matches the block entity schema for `palette[state].Name`.
+9. `entities[i]` has `pos` (`TAG_List` of three `TAG_Double`), `blockPos`
+   (`TAG_List` of three `TAG_Int`), and `nbt` (`TAG_Compound` with a known
+   entity `id`).
+10. No duplicate keys in any compound. No lists with mixed element types.
+    Compound and list nesting depth at most 512.
+11. For jigsaw blocks (section 8.2): `pool` references an existing
+    template pool; `final_state` parses as a valid block state and is
+    not a jigsaw; `joint` is one of the two enum strings; `orientation`
+    block state property is one of the 12 enum strings.
+12. For structure blocks (section 8.1): `mode`, `mirror`, `rotation` are
+    in their respective enums; `integrity` in `[0.0, 1.0]`.
+
+## 13. Common pitfalls (validator priority list)
+
+These are the cases that cause crashes in game or silent data loss when
+authors edit NBT by hand. The validator should target them in this order.
+
+1. Palette index out of bounds. `state` >= len(palette). Crashes
+   immediately on chunk load when the structure tries to place. Cheap to
+   check (DS/Structure throws here too).
+2. Block position outside the size box. Same crash class as above (DS).
+3. Jigsaw `pool` pointing at a template pool that does not exist. Silent
+   fail at generation, then a hard crash on the next save in some 1.21.x
+   patch versions. Cross reference against
+   `data/<ns>/worldgen/template_pool/` in the project plus the vanilla
+   pool list in MM/data-json.
+4. Jigsaw `final_state` malformed. Does not parse as a block state, or
+   names a block that does not exist, or is `minecraft:jigsaw`. Crashes on
+   placement.
+5. Block entity `nbt` for a block that has no block entity, or absent
+   `nbt` for a block that requires one. Both cases break placement.
+6. Palette entry `Properties` referencing a property the block does not
+   have, or a value the property does not allow (e.g.
+   `facing=upside_down` on a stair). Block silently loads as default
+   state, which usually looks wrong but does not crash.
+7. `DataVersion` outside the project's declared range. Triggers
+   migration code paths; in 1.21+ many block IDs that were renamed (e.g.
+   the rename of `grass` to `short_grass` in 1.20.3) get silently dropped
+   or replaced.
+8. `palettes` with inner palette lengths that do not match each other.
+   Random crash on placement depending on which variant the world chose.
+9. `blocks[i].nbt` containing `x`, `y`, or `z`. Most common as a side
+   effect of copying block entity NBT out of a save game. Causes
+   duplicated block entities.
+10. `entities[i].pos` and `entities[i].blockPos` disagreeing. Soft fail,
+    causes ghost entities and desync of chunk loading.
+
+## 14. Edge case decisions
+
+Decisions for the validator implementation. All items below were resolved
+by Finn in May 2026. Each entry states the resolved behaviour and any cross
+references the implementer should follow.
+
+1. Block ID to block entity mapping. mcmeta does not expose this directly;
+   the `block_entity_type` registry lists block entity types but not which
+   blocks own them. Decision: punt for now. The validator only checks
+   `blocks[i].nbt` when it is present. It does not flag a missing `nbt`
+   for blocks that happen to require one, and it does not flag a present
+   `nbt` for blocks that should not have one. Revisit once a real crash
+   case shows up. (For when this gets revisited: the cheapest source is
+   probably a hand-curated set of common block-entity-bearing block IDs
+   in this repo, since the vanilla list is small and stable across
+   versions.)
+2. Duplicate palette entries (same `Name` and same `Properties`). Decision:
+   warn but allow. deepslate dedupes on write and tolerates on read; the
+   game does not reject them. Treat duplicates as a hygiene issue, not a
+   crash class.
+3. Palette length upper bound. Decision: no hard ceiling. The game's
+   `TAG_Int` upper bound (2,147,483,647) is the only real limit, and
+   real structures stay well under that. Skip this check.
+4. Per-version block validity for structures that participate in
+   multi-version pools. Decision: every block referenced by a structure
+   NBT must exist in the earliest Minecraft version that the structure
+   can be loaded into. This is stricter than the current
+   `check_registries.py` union-of-IDs approach. The earliest version
+   per NBT is already computed by `utils/nbt_versions.py` in
+   `_build_nbt_min_versions`, which walks template pools (including the
+   `moogs_structures:versioned_single_pool_element` `locations` map) and
+   produces a `dict[Path, str]` of NBT path to lowest-allowed version.
+   The validator should:
+   * Consume that map.
+   * For each NBT, fetch the matching mcmeta tag at the lowest version
+     and verify every palette `Name` and every `Properties` key/value
+     exists in `<version>-summary/blocks/data.min.json` and
+     `<version>-registries/block/data.json`.
+   * Fail (not warn) on any block that is not present in the lowest
+     version.
+   * NBT files not referenced by any pool fall back to the project's
+     global `mc_versions[0]` (lowest configured version).
+5. Entities outside the size box. Decision: warn. Vanilla shipwrecks
+   ship entities right at the edge, so a hard fail is too strict, but
+   silent acceptance loses signal for typo-class mistakes.
+6. Structure block `metadata` field in DATA mode. Decision: do not
+   whitelist. Allow any string. Vanilla strings are documented but mods
+   legitimately use arbitrary marker strings, and the game treats this
+   field as opaque. Leaving it open avoids false positives for modded
+   structures.
+7. Caching strategy for mcmeta data. Decision: per-tag data is cached
+   in `cache/` forever (tags are immutable). The rolling
+   `summary/versions/data.min.json` (version index) is refreshed on
+   `--refresh` and otherwise reused for 24 hours.
+
+## 15. Current validator coverage
+
+This is what the repo already checks. Each entry is one module under
+`checks/`, with the rules it enforces and the data sources it consumes.
+The implementation phase should extend these, not duplicate them.
+
+`check_directory_names` (`checks/check_directory_names.py`). Verifies the
+data pack uses the right folder names for `mc_versions`: singular for 1.21+
+(`structure`, `loot_table`, `recipe`, ...), plural for pre-1.21. Skips when
+`mc_versions` spans the 1.21 boundary. Covers section 2 of this doc.
+
+`nbt_check` (`checks/nbt_check.py`). Loads every `.nbt` under the structures
+folder via `nbtlib.load`. Reports files that fail to parse. Covers section 2
+"file is gzipped NBT" plus generic "top-level tag is a Compound".
+
+`check_data_integrity` (`checks/check_data_integrity.py`). Cross references
+template pools to `.nbt` files and back, covers structure -> pool, set ->
+structure, and pool fallback chains. Includes
+`moogs_structures:versioned_single_pool_element` `locations` map handling.
+Not part of the NBT format reference per se, but it is the source of the
+per-NBT min-version map used by this doc's section 14 item 4.
+
+`check_loot_tables` (`checks/check_loot_tables.py`). Walks every `.nbt`
+palette and block-entity `nbt`, collects `LootTable` references, and verifies
+each one resolves to a real `loot_table/*.json` in the data pack.
+
+`check_loot_table_schemas` (`checks/check_loot_table_schemas.py`). Validates
+each `loot_table/*.json` against bundled JSON Schemas via Draft4Validator.
+Out of scope for this doc.
+
+`check_registries` (`checks/check_registries.py`). Already mcmeta-led. Pulls
+each version's flat ID list via
+`https://raw.githubusercontent.com/misode/mcmeta/{version}-summary/registries/data.json`
+(`registries/fetcher.py`). Validates loot-table item and block IDs against
+the union across `mc_versions`, then validates every `.nbt` palette `Name`
+against the per-NBT lowest version (uses `utils/nbt_versions.py` for the
+mapping). Annotates unknown blocks with `find_version_added` from
+`registries/version_probe.py`. This module already implements section 14
+item 4 for IDs; the new format reference adds property-level validation on
+top.
+
+`check_worldgen_schemas` (`checks/check_worldgen_schemas.py`). JSON-schema
+validates `worldgen/*` JSON files (template_pool, structure, structure_set,
+processor_list) against `schemas/*.json`. Not part of the NBT format
+reference.
+
+`check_entity_nbt` (`checks/check_entity_nbt.py`). Walks the `entities` list
+in every `.nbt`, validates entity `id` against the entity_type registry per
+version. Also enforces the 1.20.5 item-format boundary (DataVersion 3837):
+for projects targeting pre-1.20.5, items inside entity NBT must use the old
+shape (`Count`, not `count`); for 1.20.5+ they must use the new shape.
+Covers most of section 7 of this doc.
+
+`check_sign_nbt` (`checks/check_sign_nbt.py`). For projects targeting
+pre-1.20.5 (DataVersion 3836), checks that sign block-entity NBT inside
+structure files uses the old format (string `Text1`..`Text4`) rather than
+the new components-based format. Skipped when all `mc_versions >= 1.20.5`.
+
+`check_biome_tags` (`checks/check_biome_tags.py`). Verifies biome tag
+references exist in vanilla or in the project's loader tag set. Out of
+scope for this doc.
+
+`check_containers` (`checks/check_containers.py`). For chest, trapped_chest,
+and barrel blocks in palettes, walks the `blocks` list and warns on empty
+containers (no `LootTable`, no `Items`) and on hardcoded container contents
+(`Items` present without a `LootTable`). Always returns pass; output is
+informational.
+
+Supporting modules:
+
+* `registries/fetcher.py`. Fetches `<version>-summary/registries/data.json`
+  per version and unions the item / block / entity ID sets. Cache-aware.
+* `registries/version_probe.py`. Walks a hardcoded `PROBE_VERSIONS` list to
+  find the first version a given block ID appears in. Used for annotating
+  unknown-block diagnostics.
+* `utils/nbt_versions.py`. Builds the per-NBT minimum-version map from
+  template pools (including `versioned_single_pool_element` `locations`).
+  Already exists; section 14 item 4 builds on this.
+* `utils/paths.py`. Resolves the data pack folder name (`structure` vs
+  `structures`) given the project's `mc_versions`.
+
+Cache and configuration:
+
+* `cache/` holds per-version registry JSON pulled from mcmeta.
+* `validator.json` per project carries `namespace`, `mc_versions`,
+  `extra_ids` (with `@file.json` and `namespace:*` wildcards).
+
+## 16. Gap analysis: what this doc adds, what to drop
+
+What this format reference adds on top of what is already in `checks/`:
+
+| Rule from this doc | New, partially covered, or already covered |
+|---|---|
+| Section 4: `size` shape, axis range, product fits in int32 | New. No existing check inspects the `size` list. |
+| Section 5.1: palette `Name` resource-location format | Already covered (`check_registries`). |
+| Section 5.1: palette `Properties` keys and values per block | New. Use `<version>-summary/blocks/data.min.json` per the per-NBT min version. |
+| Section 5.2: `palettes` exists and inner palettes have equal length | New. |
+| Section 5: exactly one of `palette` / `palettes` | New. |
+| Section 6: `blocks[i].state` in palette range | New. Cheap. |
+| Section 6: `blocks[i].pos` in size box | New. Cheap. |
+| Section 6: `blocks[i].nbt` does not contain `x` / `y` / `z` | New. |
+| Section 6: `blocks[i].nbt` presence iff block has block entity | Punted (section 14 item 1). |
+| Section 7: `entities[i].pos` is doubles, `blockPos` is ints | Partially covered. `check_entity_nbt` validates entity `id`; this adds the type checks on `pos` / `blockPos`. |
+| Section 7: entities outside size box | New, warn-level (section 14 item 5). |
+| Section 8.1: structure-block `mode`, `mirror`, `rotation` enums; `integrity` range | New. |
+| Section 8.2: jigsaw `pool` references existing template pool | Already covered. `check_data_integrity` validates pool references at the JSON level; the new check extends this to jigsaw block-entity NBT inside structure files. |
+| Section 8.2: jigsaw `final_state` parses as a block state and is not jigsaw | New. |
+| Section 8.2: jigsaw `joint` enum; `orientation` block-state property enum | New. |
+| Section 8.2: `placement_priority` only present for DataVersion >= 3463 | New. Sign-format and item-format version boundaries are already handled in `check_sign_nbt` and `check_entity_nbt`; this is the same pattern for jigsaws. |
+| Section 9: `DataVersion` present, in range, version index lookup | New. The version index file is already pulled by `check_sign_nbt` and `check_entity_nbt`; reuse the same loader. |
+| Section 10: duplicate compound keys, mixed-type lists, nesting depth 512 | New. `nbtlib` does not enforce these. |
+
+Drop deepslate from the validation plan. Concretely:
+
+* deepslate is not currently a runtime dependency (this validator is Python
+  + `nbtlib`). It should not become one.
+* Every check deepslate's `Structure.fromNbt` performs is reproducible with
+  raw `nbtlib` parsing plus mcmeta data:
+  * "Block outside size bounds" -> check `blocks[i].pos` against `size`
+    using plain Python.
+  * "Palette index out of range" -> check `state < len(palette)`.
+  * "Palette `Name` valid" -> check against
+    `<version>-registries/block/data.json` (already done in
+    `check_registries`).
+  * "Palette `Properties` valid" -> check against
+    `<version>-summary/blocks/data.min.json` (new check).
+  * "NBT file is parseable" -> `nbtlib.load` already does this in
+    `nbt_check`.
+* The only nontrivial deepslate-only logic is `BlockState.parse`, which
+  parses a block-state string like
+  `minecraft:smooth_stone_slab[type=top,waterlogged=false]` (used here
+  for jigsaw `final_state` in section 8.2). That grammar is small enough
+  to implement directly in Python (regex-based: split on `[`, comma-split
+  inside the brackets, equals-split each pair). Roughly 30 lines, no
+  TypeScript dependency required.
+* deepslate citations remain in this doc as a sanity reference (so a
+  future maintainer can see how a known-good parser handles the format),
+  but no validator check should depend on its behaviour.
