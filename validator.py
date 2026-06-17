@@ -21,6 +21,7 @@ class ValidatorContext:
     valid_blocks: set[str] = field(default_factory=set)
     valid_items: set[str] = field(default_factory=set)
     valid_entities: set[str] = field(default_factory=set)
+    orphan_nbts: set[Path] = field(default_factory=set)
 
 
 def resolve_extra_ids(raw: list[str], project_root: Path) -> set[str]:
@@ -156,6 +157,17 @@ def main() -> None:
     bom_fixed = _strip_bom_files(ctx.project_root)
     if bom_fixed:
         print(f"  [pre-pass] stripped UTF-8 BOM from {bom_fixed} file(s)")
+
+    from checks.check_data_integrity import _check_orphaned_nbt
+    from utils.paths import data_dir
+    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
+    structures_dir = data_dir(namespace_root, "structure")
+    template_pool_dir = namespace_root / "worldgen" / "template_pool"
+    if structures_dir.exists() and template_pool_dir.exists():
+        ctx.orphan_nbts = {
+            (structures_dir / rel).resolve()
+            for rel in _check_orphaned_nbt(template_pool_dir, structures_dir, ctx.namespace)
+        }
 
     results = run_checks(ctx)
     _print_summary(results)

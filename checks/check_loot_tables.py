@@ -48,6 +48,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     structure_tables: dict[str, set[str]] = {}
 
     for nbt_path in sorted(structure_dir.rglob("*.nbt")):
+        if nbt_path.resolve() in ctx.orphan_nbts:
+            continue
         rel = str(nbt_path.relative_to(structure_dir).with_suffix("")).replace("\\", "/")
         try:
             nbtfile = nbtlib.load(str(nbt_path))

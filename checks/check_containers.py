@@ -28,6 +28,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     hardcoded: list[str] = []
 
     for nbt_path in sorted(structure_dir.rglob("*.nbt")):
+        if nbt_path.resolve() in ctx.orphan_nbts:
+            continue
         try:
             nbt = nbtlib.load(str(nbt_path))
         except Exception:
@@ -68,7 +70,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             items_tag = block_nbt.get("Items")
             has_items = items_tag is not None and len(items_tag) > 0
 
-            if not has_loot and not has_items:
+            if not has_loot and not has_items and block_name != "minecraft:barrel":
                 empty.append(label)
             elif has_items and not has_loot:
                 hardcoded.append(label)

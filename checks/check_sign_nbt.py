@@ -50,6 +50,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     bad_sign_count = 0
 
     for nbt_path in sorted(structures_dir.rglob("*.nbt")):
+        if nbt_path.resolve() in ctx.orphan_nbts:
+            continue
         try:
             nbt = nbtlib.load(str(nbt_path))
         except Exception as e:
