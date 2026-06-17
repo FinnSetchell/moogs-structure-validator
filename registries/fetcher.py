@@ -1,6 +1,7 @@
 import json
 import pathlib
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 
 _REGISTRY_URL = "https://raw.githubusercontent.com/misode/mcmeta/{version}-summary/registries/data.json"
@@ -30,8 +31,10 @@ def fetch_registries(
     blocks_per_version: list[set[str]] = []
     entities_per_version: list[set[str]] = []
 
-    for version in mc_versions:
-        data = _fetch_version(version, cache_dir, refresh)
+    with ThreadPoolExecutor(max_workers=min(8, len(mc_versions) or 1)) as ex:
+        version_data = list(ex.map(lambda v: _fetch_version(v, cache_dir, refresh), mc_versions))
+
+    for data in version_data:
         items_per_version.append({"minecraft:" + n for n in data.get("item", [])})
         blocks_per_version.append({"minecraft:" + n for n in data.get("block", [])})
         entities_per_version.append({"minecraft:" + n for n in data.get("entity_type", [])})
