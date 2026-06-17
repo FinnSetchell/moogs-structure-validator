@@ -1,4 +1,6 @@
 import argparse
+import contextlib
+import io
 import json
 import sys
 import traceback
@@ -65,7 +67,7 @@ def _strip_bom_files(project_root: Path) -> int:
             fixed += 1
     return fixed
 
-def run_checks(ctx: ValidatorContext) -> list[tuple[str, bool, str]]:
+def _check_modules():
     import checks.check_directory_names as check_directory_names
     import checks.nbt_check as nbt_check
     import checks.check_data_integrity as check_data_integrity
@@ -78,7 +80,7 @@ def run_checks(ctx: ValidatorContext) -> list[tuple[str, bool, str]]:
     import checks.check_biome_tags as check_biome_tags
     import checks.check_containers as check_containers
 
-    check_modules = [
+    return [
         ("check_directory_names", check_directory_names),
         ("nbt_check", nbt_check),
         ("check_data_integrity", check_data_integrity),
@@ -92,30 +94,71 @@ def run_checks(ctx: ValidatorContext) -> list[tuple[str, bool, str]]:
         ("check_containers", check_containers),
     ]
 
-    results: list[tuple[str, bool, str]] = []
+
+def _filter_modules(modules, only: list[str] | None, skip: list[str] | None):
+    names = [n for n, _ in modules]
+    requested = (only or []) + (skip or [])
+    unknown = [n for n in requested if n not in names]
+    if unknown:
+        raise SystemExit(
+            f"unknown check name(s): {', '.join(unknown)}\n"
+            f"available: {', '.join(names)}"
+        )
+    result = modules
+    if only:
+        result = [(n, m) for n, m in result if n in only]
+    if skip:
+        result = [(n, m) for n, m in result if n not in skip]
+    return result
+
+
+def run_checks(
+    ctx: ValidatorContext,
+    only: list[str] | None = None,
+    skip: list[str] | None = None,
+) -> list[tuple[str, bool, str, str]]:
+    check_modules = _filter_modules(_check_modules(), only, skip)
+
+    results: list[tuple[str, bool, str, str]] = []
     for name, module in check_modules:
         _banner(name)
-        try:
-            passed, summary = module.run(ctx)
-        except Exception:
-            print("  [crashed]")
-            traceback.print_exc()
-            passed, summary = False, "crashed with exception"
-        print(f"  {'PASS' if passed else 'FAIL'}")
-        results.append((name, passed, summary))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(_TeeStream(sys.stdout, buf)):
+            try:
+                passed, summary = module.run(ctx)
+            except Exception:
+                print("  [crashed]")
+                traceback.print_exc()
+                passed, summary = False, "crashed with exception"
+            print(f"  {'PASS' if passed else 'FAIL'}")
+        results.append((name, passed, summary, buf.getvalue()))
 
     return results
 
 
-def _print_summary(results: list[tuple[str, bool, str]]) -> None:
+class _TeeStream:
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, data):
+        for s in self._streams:
+            s.write(data)
+        return len(data)
+
+    def flush(self):
+        for s in self._streams:
+            s.flush()
+
+
+def _print_summary(results: list[tuple[str, bool, str, str]]) -> None:
     print(f"\n{'=' * _W}")
     print("  SUMMARY")
     print("=" * _W)
-    name_w = max(len(n) for n, _, _ in results) + 2
-    for name, passed, summary in results:
+    name_w = max(len(n) for n, _, _, _ in results) + 2
+    for name, passed, summary, _ in results:
         status = "PASS" if passed else "FAIL"
         print(f"  {status}  {name:<{name_w}} {summary}")
-    n_passed = sum(1 for _, p, _ in results if p)
+    n_passed = sum(1 for _, p, _, _ in results if p)
     n_failed = len(results) - n_passed
     parts = []
     if n_passed:
@@ -126,12 +169,58 @@ def _print_summary(results: list[tuple[str, bool, str]]) -> None:
     print("=" * _W)
 
 
+def _emit_json(
+    ctx: ValidatorContext, results: list[tuple[str, bool, str, str]], stream
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "namespace": ctx.namespace,
+        "mc_versions": ctx.mc_versions,
+        "overall_pass": all(p for _, p, _, _ in results),
+        "checks": [
+            {"name": n, "passed": p, "summary": s, "output": out}
+            for n, p, s, out in results
+        ],
+    }
+    json.dump(payload, stream, indent=2)
+    stream.write("\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--project-root", required=True, type=Path)
     parser.add_argument("--refresh", action="store_true")
+    parser.add_argument(
+        "--check",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="run only the named check (may be repeated)",
+    )
+    parser.add_argument(
+        "--skip-check",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="skip the named check (may be repeated)",
+    )
+    parser.add_argument(
+        "--json",
+        dest="json_out",
+        nargs="?",
+        const="-",
+        default=None,
+        metavar="PATH",
+        help="emit machine-readable JSON report (path or - for stdout)",
+    )
     args = parser.parse_args()
+
+    json_mode = args.json_out is not None
+    human_stream = sys.stderr if json_mode else sys.stdout
+    real_stdout = sys.stdout
+    if json_mode:
+        sys.stdout = human_stream
 
     cfg = load_config(args.config)
 
@@ -170,10 +259,17 @@ def main() -> None:
             for rel in _check_orphaned_nbt(template_pool_dir, structures_dir, ctx.namespace)
         }
 
-    results = run_checks(ctx)
+    results = run_checks(ctx, only=args.check or None, skip=args.skip_check or None)
     _print_summary(results)
 
-    if any(not passed for _, passed, _ in results):
+    if json_mode:
+        if args.json_out == "-":
+            _emit_json(ctx, results, real_stdout)
+        else:
+            with open(args.json_out, "w", encoding="utf-8") as f:
+                _emit_json(ctx, results, f)
+
+    if any(not passed for _, passed, _, _ in results):
         sys.exit(1)
 
 
