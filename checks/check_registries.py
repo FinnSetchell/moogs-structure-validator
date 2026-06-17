@@ -9,6 +9,7 @@ import nbtlib
 
 from registries.fetcher import _fetch_version
 from registries.version_probe import find_version_added
+from utils.nbt_cache import load_nbt
 from utils.nbt_versions import _build_nbt_min_versions, _parse_version
 from utils.paths import data_dir
 
@@ -116,7 +117,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             if nbt_path.resolve() in ctx.orphan_nbts:
                 continue
             try:
-                nbt = nbtlib.load(str(nbt_path))
+                nbt = load_nbt(ctx, nbt_path)
             except Exception:
                 continue
             palette = nbt.get("palette")

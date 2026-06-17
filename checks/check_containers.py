@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import nbtlib
 
+from utils.nbt_cache import load_nbt
 from utils.paths import data_dir
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         if nbt_path.resolve() in ctx.orphan_nbts:
             continue
         try:
-            nbt = nbtlib.load(str(nbt_path))
+            nbt = load_nbt(ctx, nbt_path)
         except Exception:
             continue
 

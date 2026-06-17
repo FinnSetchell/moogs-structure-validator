@@ -22,6 +22,7 @@ class ValidatorContext:
     valid_items: set[str] = field(default_factory=set)
     valid_entities: set[str] = field(default_factory=set)
     orphan_nbts: set[Path] = field(default_factory=set)
+    nbt_cache: dict = field(default_factory=dict)
 
 
 def resolve_extra_ids(raw: list[str], project_root: Path) -> set[str]:

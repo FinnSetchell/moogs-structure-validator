@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import nbtlib
 
 from registries.fetcher import _fetch_version
+from utils.nbt_cache import load_nbt
 from utils.nbt_versions import _build_nbt_min_versions, _parse_version
 from utils.paths import data_dir
 from utils.versions import load_version_map
@@ -102,7 +103,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         if nbt_path.resolve() in ctx.orphan_nbts:
             continue
         try:
-            nbt = nbtlib.load(str(nbt_path))
+            nbt = load_nbt(ctx, nbt_path)
         except Exception as e:
             print(f"  [WARN] could not load {nbt_path.name}: {e}")
             continue

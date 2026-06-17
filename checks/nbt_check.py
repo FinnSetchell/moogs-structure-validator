@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import nbtlib
-
+from utils.nbt_cache import load_nbt
 from utils.paths import data_dir
 
 if TYPE_CHECKING:
@@ -24,7 +23,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     for nbt_path in sorted(structures_dir.rglob("*.nbt")):
         rel = nbt_path.relative_to(structures_dir)
         try:
-            nbtlib.load(str(nbt_path))
+            load_nbt(ctx, nbt_path)
             ok += 1
         except Exception as e:
             corrupt.append((str(rel), str(e)))
