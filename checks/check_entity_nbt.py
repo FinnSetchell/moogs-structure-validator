@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import urllib.request
 from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -11,31 +9,13 @@ import nbtlib
 from registries.fetcher import _fetch_version
 from utils.nbt_versions import _build_nbt_min_versions, _parse_version
 from utils.paths import data_dir
+from utils.versions import load_version_map
 
 if TYPE_CHECKING:
     from validator import ValidatorContext
 
 
-_VERSIONS_URL = "https://raw.githubusercontent.com/misode/mcmeta/summary/versions/data.json"
 _NEW_FORMAT_BOUNDARY_DV = 3837  # 1.20.5
-
-
-def _load_version_map(cache_dir: Path, refresh: bool) -> dict[str, int]:
-    cache_file = cache_dir / "versions.json"
-    if cache_file.exists() and not refresh:
-        with cache_file.open() as f:
-            entries = json.load(f)
-    else:
-        try:
-            with urllib.request.urlopen(_VERSIONS_URL) as resp:
-                entries = json.loads(resp.read().decode())
-            with cache_file.open("w") as f:
-                json.dump(entries, f)
-        except Exception as e:
-            print(f"  [WARN] could not fetch versions.json: {e}")
-            return {}
-
-    return {e["id"]: e["data_version"] for e in entries if e.get("stable")}
 
 
 def _is_valid(id_: str, valid_set: set[str], extra_ids: set[str]) -> bool:
@@ -76,7 +56,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
     cache_dir = Path(__file__).parent.parent / "cache"
 
-    version_map = _load_version_map(cache_dir, ctx.refresh)
+    version_map = load_version_map(cache_dir, ctx.refresh)
 
     max_allowed_dv: int | None = None
     max_version_name: str | None = None
