@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 import nbtlib
 from pathlib import Path
 
+from utils.nbt_cache import load_nbt
 from utils.paths import data_dir
 
 if TYPE_CHECKING:
@@ -48,9 +49,11 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     structure_tables: dict[str, set[str]] = {}
 
     for nbt_path in sorted(structure_dir.rglob("*.nbt")):
+        if nbt_path.resolve() in ctx.orphan_nbts:
+            continue
         rel = str(nbt_path.relative_to(structure_dir).with_suffix("")).replace("\\", "/")
         try:
-            nbtfile = nbtlib.load(str(nbt_path))
+            nbtfile = load_nbt(ctx, nbt_path)
         except Exception as e:
             print(f"  [ERROR] {rel}.nbt — {e}")
             continue
