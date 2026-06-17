@@ -108,7 +108,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             continue
 
         files_checked += 1
-        rel = nbt_path.name
+        rel = str(nbt_path.relative_to(structures_dir))
 
         file_version = nbt_min_versions.get(nbt_path, global_min_version)
 
