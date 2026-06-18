@@ -11,10 +11,47 @@ from utils.paths import data_dir
 if TYPE_CHECKING:
     from validator import ValidatorContext
 
+_SHULKER_BOXES = {
+    "minecraft:shulker_box",
+    "minecraft:white_shulker_box",
+    "minecraft:orange_shulker_box",
+    "minecraft:magenta_shulker_box",
+    "minecraft:light_blue_shulker_box",
+    "minecraft:yellow_shulker_box",
+    "minecraft:lime_shulker_box",
+    "minecraft:pink_shulker_box",
+    "minecraft:gray_shulker_box",
+    "minecraft:light_gray_shulker_box",
+    "minecraft:cyan_shulker_box",
+    "minecraft:purple_shulker_box",
+    "minecraft:blue_shulker_box",
+    "minecraft:brown_shulker_box",
+    "minecraft:green_shulker_box",
+    "minecraft:red_shulker_box",
+    "minecraft:black_shulker_box",
+}
+
 _CONTAINER_BLOCKS = {
     "minecraft:chest",
     "minecraft:trapped_chest",
     "minecraft:barrel",
+    "minecraft:hopper",
+    "minecraft:dispenser",
+    "minecraft:dropper",
+    *_SHULKER_BOXES,
+}
+
+# Having no items is normal for these (they fill dynamically or are decorative)
+_NO_EMPTY_WARN = {
+    "minecraft:barrel",
+    "minecraft:hopper",
+}
+
+# Having hardcoded items is intentional for these (they dispense/drop specific items)
+_NO_HARDCODED_WARN = {
+    "minecraft:hopper",
+    "minecraft:dispenser",
+    "minecraft:dropper",
 }
 
 
@@ -64,16 +101,17 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
             block_nbt = block.get("nbt")
             if block_nbt is None:
-                empty.append(label)
+                if block_name not in _NO_EMPTY_WARN:
+                    empty.append(label)
                 continue
 
             has_loot = "LootTable" in block_nbt
             items_tag = block_nbt.get("Items")
             has_items = items_tag is not None and len(items_tag) > 0
 
-            if not has_loot and not has_items and block_name != "minecraft:barrel":
+            if not has_loot and not has_items and block_name not in _NO_EMPTY_WARN:
                 empty.append(label)
-            elif has_items and not has_loot:
+            elif has_items and not has_loot and block_name not in _NO_HARDCODED_WARN:
                 hardcoded.append(label)
 
     for msg in empty:

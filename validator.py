@@ -79,6 +79,8 @@ def _check_modules():
     import checks.check_sign_nbt as check_sign_nbt
     import checks.check_biome_tags as check_biome_tags
     import checks.check_containers as check_containers
+    import checks.check_jigsaw_pools as check_jigsaw_pools
+    import checks.check_processor_rules as check_processor_rules
 
     return [
         ("check_directory_names", check_directory_names),
@@ -92,6 +94,8 @@ def _check_modules():
         ("check_sign_nbt", check_sign_nbt),
         ("check_biome_tags", check_biome_tags),
         ("check_containers", check_containers),
+        ("check_jigsaw_pools", check_jigsaw_pools),
+        ("check_processor_rules", check_processor_rules),
     ]
 
 

@@ -75,3 +75,6 @@ Add these steps to your mod's `release.yml`:
 | `check_registries` | Validates item/block IDs against MC registries for all targeted versions |
 | `check_worldgen_schemas` | Validates worldgen JSON (template pools, structures, structure sets, processor lists) against MC schemas |
 | `nbt_check` | Verifies all NBT files are readable |
+| `check_containers` | Warns on containers (chests, barrels, shulker boxes, hoppers, dispensers, droppers) that are empty or have hardcoded items instead of a loot table |
+| `check_jigsaw_pools` | Validates that each jigsaw block's pool field references a template pool that exists in the datapack or a known-valid namespace |
+| `check_processor_rules` | Validates block IDs in processor_list rule processors against the version registry |
