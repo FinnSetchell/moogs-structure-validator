@@ -1,5 +1,13 @@
 # changelog
 
+## v1.5.1 — 2026-06-18
+
+### Docs
+- full README rewrite covering all 13 checks + new cli flags
+- merged NBT-STRUCTURE-FORMAT.md to main
+- added CONTRIBUTING.md with check contract + workflow
+- added VERSIONING.md codifying tag policy
+
 ## v1.5.0 — 2026-06-18
 
 ### Added
