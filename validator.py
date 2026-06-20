@@ -81,6 +81,7 @@ def _check_modules():
     import checks.check_containers as check_containers
     import checks.check_jigsaw_pools as check_jigsaw_pools
     import checks.check_processor_rules as check_processor_rules
+    import checks.check_item_format as check_item_format
 
     return [
         ("check_directory_names", check_directory_names),
@@ -96,6 +97,7 @@ def _check_modules():
         ("check_containers", check_containers),
         ("check_jigsaw_pools", check_jigsaw_pools),
         ("check_processor_rules", check_processor_rules),
+        ("check_item_format", check_item_format),
     ]
 
 
