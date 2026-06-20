@@ -83,6 +83,7 @@ def _check_modules():
     import checks.check_processor_rules as check_processor_rules
     import checks.check_item_format as check_item_format
     import checks.check_entity_equipment_shape as check_entity_equipment_shape
+    import checks.check_entity_nbt_keys as check_entity_nbt_keys
 
     return [
         ("check_directory_names", check_directory_names),
@@ -100,6 +101,7 @@ def _check_modules():
         ("check_processor_rules", check_processor_rules),
         ("check_item_format", check_item_format),
         ("check_entity_equipment_shape", check_entity_equipment_shape),
+        ("check_entity_nbt_keys", check_entity_nbt_keys),
     ]
 
 
