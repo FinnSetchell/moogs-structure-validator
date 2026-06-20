@@ -84,6 +84,7 @@ def _check_modules():
     import checks.check_item_format as check_item_format
     import checks.check_entity_equipment_shape as check_entity_equipment_shape
     import checks.check_entity_nbt_keys as check_entity_nbt_keys
+    import checks.check_no_spawn_eggs as check_no_spawn_eggs
 
     return [
         ("check_directory_names", check_directory_names),
@@ -102,6 +103,7 @@ def _check_modules():
         ("check_item_format", check_item_format),
         ("check_entity_equipment_shape", check_entity_equipment_shape),
         ("check_entity_nbt_keys", check_entity_nbt_keys),
+        ("check_no_spawn_eggs", check_no_spawn_eggs),
     ]
 
 
