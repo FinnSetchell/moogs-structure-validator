@@ -1,0 +1,19 @@
+{
+  "_comment": "Per-mob per-key version constraints for check_entity_nbt_keys. First cut — covers the keys most likely to cause silent bugs in Moogs mods. Extend as new version-gated keys are found. min_dv / max_dv are DataVersion integers (from misode/mcmeta versions.json). A key with only min_dv is invalid before that DV. A key with only max_dv is invalid from that DV onward. Both can be set. All boundaries are inclusive.",
+  "minecraft:painting": {
+    "Motive": {
+      "max_dv": 3952,
+      "note": "Pre-1.21 (DV <= 3952) string variant key. Renamed to 'variant' (namespaced string) in 1.21 (DV 3953). Files targeting 1.21+ should use 'variant'."
+    },
+    "variant": {
+      "min_dv": 3953,
+      "note": "Namespaced variant key added in 1.21 (DV 3953). Pre-1.21 files must use 'Motive' instead."
+    }
+  },
+  "minecraft:wolf": {
+    "variant": {
+      "min_dv": 3837,
+      "note": "Wolf variants (e.g. minecraft:pale) added in 1.20.5 (DV 3837). Pre-1.20.5 wolves had no variant key."
+    }
+  }
+}
