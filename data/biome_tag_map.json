@@ -73,6 +73,13 @@
       "path": "src/generated/resources/data/c/tags/worldgen/biome",
       "ref": "1.21.1",
       "link": "https://github.com/neoforged/NeoForge/tree/1.21.1/src/generated/resources/data/c/tags/worldgen/biome"
+    },
+    "26.x": {
+      "versions": ["26.1", "26.1.1", "26.1.2", "26.2"],
+      "repository": "neoforged/NeoForge",
+      "path": "src/generated/resources/data/c/tags/worldgen/biome",
+      "ref": "26.1.2",
+      "link": "https://github.com/neoforged/NeoForge/tree/26.1.2/src/generated/resources/data/c/tags/worldgen/biome"
     }
   },
   "fabric": {
@@ -91,6 +98,22 @@
       "ref": "1.21.1",
       "tag_style": "is_prefixed",
       "link": "https://github.com/FabricMC/fabric-api/tree/1.21.1/fabric-convention-tags-v2/src/generated/resources/data/c/tags/worldgen/biome"
+    },
+    "26.1.x": {
+      "versions": ["26.1", "26.1.1", "26.1.2"],
+      "repository": "FabricMC/fabric-api",
+      "path": "fabric-convention-tags-v2/src/generated/resources/data/c/tags/worldgen/biome",
+      "ref": "26.1",
+      "tag_style": "is_prefixed",
+      "link": "https://github.com/FabricMC/fabric-api/tree/26.1/fabric-convention-tags-v2/src/generated/resources/data/c/tags/worldgen/biome"
+    },
+    "26.2": {
+      "versions": ["26.2"],
+      "repository": "FabricMC/fabric-api",
+      "path": "fabric-convention-tags-v2/src/generated/resources/data/c/tags/worldgen/biome",
+      "ref": "26.2",
+      "tag_style": "is_prefixed",
+      "link": "https://github.com/FabricMC/fabric-api/tree/26.2/fabric-convention-tags-v2/src/generated/resources/data/c/tags/worldgen/biome"
     }
   }
 }

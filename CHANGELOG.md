@@ -1,5 +1,12 @@
 # changelog
 
+## v1.6.1 — 2026-06-21
+
+### Added
+- mc 26.2 support (DV 4903, pack format 88.0, released 2026-06-16)
+- biome tag map entries for NeoForge and Fabric across all 26.x versions (26.1 / 26.1.1 / 26.1.2 / 26.2); loader biome tag check now active for 26.x targets
+- check_no_spawn_eggs - flags spawn egg items in structure container NBT (chest/barrel/shulker/hopper/dispenser/dropper/chest_minecart/hopper_minecart/item_frame/glow_item_frame) and in loot table entries
+
 ## v1.6.0 — 2026-06-20
 
 ### Added
