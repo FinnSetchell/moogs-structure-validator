@@ -1,5 +1,18 @@
 # changelog
 
+## v1.7.1 -- 2026-07-05
+
+### Added
+- check_attribute_ids -- validates entity `Attributes` (legacy) / `attributes` list plus item AttributeModifiers against the target range's attribute registry. Flags legacy list on min>=1.21 target and new list on max<1.21 target (list-shape rename); flags prefixed ids (`generic.`/`player.`/`zombie.`) on min>=1.21.2 targets and unprefixed on max<1.21.2; spans on either boundary FAIL.
+- check_potion_effects -- flags potion/splash_potion/lingering_potion/tipped_arrow items and area_effect_cloud entities whose effect keys sit on the wrong side of the 1.20.5 envelope boundary (`tag.CustomPotionEffects`/`custom_potion_effects` vs `components.minecraft:potion_contents.custom_effects`), plus the 1.20.2 PascalCase-to-snake_case rename inside `tag`.
+
+### Changed
+- check_entity_nbt_keys is now range-aware: a rule's key-valid DV window must fully contain the file's `(min_dv, max_dv)` range; violations distinguish "entirely older", "entirely newer", and "spans that boundary". Also switches to iter_entities so passengers and spawner-nested entities go through the same rules.
+- check_entity_nbt DataVersion drift downgraded from FAIL to INFO. MC's data fixer handles raw DV drift on load; content-focused checks flag actual schema mismatches.
+
+### Tests
+- tests/nbt_helpers.py + tests/test_fixtures_end_to_end.py -- 17 fixture-based end-to-end tests covering pass and fail cases for seven checks (equipment shape, book contents, text components, version coverage, attribute ids, potion effects, per-mob key rules). Suite total: 41.
+
 ## v1.7.0 -- 2026-07-05
 
 ### Added

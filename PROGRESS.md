@@ -32,8 +32,10 @@
 - [x] `checks/check_item_format.py` -- walks block-entity items; enchantments-shape check across three eras
 - [x] `checks/check_registries.py._collect_ids` -- handles set_contents / give_item
 
+## v1.7.1 additions (2026-07-05)
+- [x] `checks/check_attribute_ids.py` -- attribute id prefix check at 1.21.2; entity Attributes/attributes list shape at 1.21
+- [x] `checks/check_potion_effects.py` -- CustomPotionEffects/custom_potion_effects/potion_contents.custom_effects across 1.20.2 and 1.20.5 boundaries
+- [x] `checks/check_entity_nbt_keys.py` -- range-aware (min+max, not just min); uses iter_entities for recursion
+- [x] `tests/nbt_helpers.py`, `tests/test_fixtures_end_to_end.py` -- fixture-based end-to-end tests (17 new, 41 total in suite)
+
 ## Pending
-- [ ] Pytest scaffolding + hand-built fixtures for each new failure mode
-- [ ] Attribute prefix rules at 1.21.2 (generic./player./zombie.) on entity `Attributes`/`attributes`
-- [ ] custom_potion_effects vs potion_contents.custom_effects on potion/arrow items and area_effect_cloud
-- [ ] Per-mob key rules integration with min+max version ranges (currently `check_entity_nbt_keys` uses only min)
