@@ -76,6 +76,20 @@ def test_nether_structure_missing_search_direction_fails(tmp_path):
     assert not passed
 
 
+def test_y_allowance_inverted_fails(tmp_path):
+    data = _generic_structure(y_allowance={"min_y_allowed": 60, "max_y_allowed": 20})
+    _write(tmp_path, "test", "structure", "s.json", data)
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_y_allowance_valid_passes(tmp_path):
+    data = _generic_structure(y_allowance={"min_y_allowed": 20, "max_y_allowed": 60})
+    _write(tmp_path, "test", "structure", "s.json", data)
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
 def test_versioned_element_without_locations_fails(tmp_path):
     element = {
         "element_type": "moogs_structures:versioned_single_pool_element",

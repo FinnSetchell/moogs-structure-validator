@@ -109,6 +109,16 @@ def _check_msl_types(subdir: str, rel, data: dict) -> int:
                 errors += 1
             else:
                 errors += _validate_against(schema_file, data, subdir, rel, "(root)")
+                # MSL throws at datapack load when max_y_allowed < min_y_allowed;
+                # json schema can't compare fields, so check it here.
+                allowance = data.get("y_allowance")
+                if isinstance(allowance, dict):
+                    min_y = allowance.get("min_y_allowed")
+                    max_y = allowance.get("max_y_allowed")
+                    if isinstance(min_y, int) and isinstance(max_y, int) and max_y < min_y:
+                        print(f"  [{subdir}] {rel} @ y_allowance")
+                        print(f"    max_y_allowed {max_y} is less than min_y_allowed {min_y}")
+                        errors += 1
 
     elif subdir == "template_pool":
         for where, element in _iter_pool_elements(data):
