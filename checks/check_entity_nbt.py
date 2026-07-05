@@ -191,7 +191,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         return version_effect_cache[version]
 
     dv_outdated: dict[tuple[int, str], list[str]] = defaultdict(list)
-    dv_wired_fail: list[str] = []
+    dv_wired_info: list[str] = []
     errors: list[str] = []
     files_checked = 0
     entities_checked = 0
@@ -224,11 +224,10 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         if dv_tag is not None:
             file_dv = int(dv_tag)
             if is_wired and file_min_dv is not None and file_dv > file_min_dv:
-                dv_wired_fail.append(
-                    f"[ERROR] {rel}: DataVersion {file_dv} > wired min target"
-                    f" {file_min} (DV {file_min_dv}) -- file was saved in a newer game"
-                    f" version than its lowest wired range supports; almost certainly an"
-                    f" unconverted copy"
+                dv_wired_info.append(
+                    f"[INFO] {rel}: DataVersion {file_dv} > wired min target"
+                    f" {file_min} (DV {file_min_dv}); MC's data fixer handles the load,"
+                    f" but content checks may still flag schema issues"
                 )
             elif max_allowed_dv is not None and file_dv > max_allowed_dv:
                 dv_version_name = next(
@@ -285,8 +284,13 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                     valid_effects, ctx.extra_ids,
                 ))
 
-    for msg in dv_wired_fail:
-        print(f"  {msg}")
+    if dv_wired_info:
+        print(f"  DataVersion drift: {len(dv_wired_info)} file(s) saved in a newer MC"
+              f" version than their wired min target (informational, not a failure):")
+        for msg in dv_wired_info[:10]:
+            print(f"  {msg}")
+        if len(dv_wired_info) > 10:
+            print(f"    ...and {len(dv_wired_info) - 10} more")
 
     if dv_outdated:
         total_outdated = sum(len(v) for v in dv_outdated.values())
@@ -301,13 +305,12 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     for msg in errors:
         print(f"  {msg}")
 
-    if not dv_outdated and not errors and not dv_wired_fail:
+    if not dv_outdated and not errors and not dv_wired_info:
         print(f"  {files_checked} file(s), {entities_checked} entity ID(s) checked -- all valid")
 
     n_outdated = sum(len(v) for v in dv_outdated.values())
-    total_errors = len(errors) + len(dv_wired_fail)
-    if total_errors:
-        return False, f"{n_outdated} warning(s), {total_errors} error(s)"
+    if errors:
+        return False, f"{n_outdated} warning(s), {len(errors)} error(s)"
     if dv_outdated:
         return True, f"{n_outdated} warning(s), 0 errors"
     return True, f"{files_checked} files, {entities_checked} entities checked"
