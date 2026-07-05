@@ -20,10 +20,108 @@ _SUBDIRS: list[tuple[str, str]] = [
     ("processor_list", "processor_list.json"),
 ]
 
+_MSL_PREFIX = "moogs_structures:"
+
+# MSL type-specific schemas, dispatched on the "type" / "element_type" value.
+_MSL_STRUCTURE_SCHEMAS: dict[str, str] = {
+    "moogs_structures:moogs_structures_generic_jigsaw_structure": "msl_generic_jigsaw_structure.json",
+    "moogs_structures:moogs_structures_generic_nether_jigsaw_structure": "msl_generic_nether_jigsaw_structure.json",
+}
+_MSL_ELEMENT_SCHEMAS: dict[str, str] = {
+    "moogs_structures:versioned_single_pool_element": "msl_versioned_pool_element.json",
+    "moogs_structures:mirroring_single_pool_element": "msl_mirroring_pool_element.json",
+    "moogs_structures:legacy_ocean_bottom_single_pool_element": "msl_legacy_ocean_bottom_pool_element.json",
+}
+_MSL_PLACEMENT_SCHEMAS: dict[str, str] = {
+    "moogs_structures:advanced_random_spread": "msl_advanced_random_spread.json",
+}
+
+_schema_cache: dict[str, dict] = {}
+
 
 def _load_schema(filename: str) -> dict:
-    with (_SCHEMAS_DIR / filename).open() as f:
-        return json.load(f)
+    if filename not in _schema_cache:
+        with (_SCHEMAS_DIR / filename).open() as f:
+            _schema_cache[filename] = json.load(f)
+    return _schema_cache[filename]
+
+
+def _validate_against(filename: str, data: dict, subdir: str, rel, where: str) -> int:
+    """Validate data against a type-specific schema; print and count errors."""
+    validator = jsonschema.Draft4Validator(_load_schema(filename))
+    errors = sorted(validator.iter_errors(data), key=lambda e: list(e.path))
+    for error in errors:
+        path_str = " > ".join(str(p) for p in error.absolute_path) if error.absolute_path else where
+        print(f"  [{subdir}] {rel} @ {path_str}")
+        print(f"    {error.message}")
+    return len(errors)
+
+
+def _iter_pool_elements(data: dict):
+    """Yield (index_path, element_dict) for every element in a template pool,
+    recursing into list_pool_element nesting."""
+    def walk(elements, prefix):
+        for i, entry in enumerate(elements):
+            if not isinstance(entry, dict):
+                continue
+            element = entry.get("element", entry)
+            if not isinstance(element, dict):
+                continue
+            yield f"{prefix}elements > {i}", element
+            nested = element.get("elements")
+            if isinstance(nested, list):
+                yield from walk(nested, f"{prefix}elements > {i} > ")
+
+    elements = data.get("elements")
+    if isinstance(elements, list):
+        yield from walk(elements, "")
+
+
+def _check_msl_types(subdir: str, rel, data: dict) -> int:
+    """Apply MSL type-specific schemas on top of the base schema pass.
+
+    Unknown moogs_structures:* type ids are flagged (typo catcher): the game
+    silently falls back or hard-fails on these, so they never work as intended.
+    """
+    errors = 0
+
+    if subdir == "structure":
+        stype = data.get("type")
+        if isinstance(stype, str) and stype.startswith(_MSL_PREFIX):
+            schema_file = _MSL_STRUCTURE_SCHEMAS.get(stype)
+            if schema_file is None:
+                print(f"  [{subdir}] {rel} @ type")
+                print(f"    unknown MSL structure type {stype!r}")
+                errors += 1
+            else:
+                errors += _validate_against(schema_file, data, subdir, rel, "(root)")
+
+    elif subdir == "template_pool":
+        for where, element in _iter_pool_elements(data):
+            etype = element.get("element_type") or element.get("type")
+            if isinstance(etype, str) and etype.startswith(_MSL_PREFIX):
+                schema_file = _MSL_ELEMENT_SCHEMAS.get(etype)
+                if schema_file is None:
+                    print(f"  [{subdir}] {rel} @ {where}")
+                    print(f"    unknown MSL pool element type {etype!r}")
+                    errors += 1
+                else:
+                    errors += _validate_against(schema_file, element, subdir, rel, where)
+
+    elif subdir == "structure_set":
+        placement = data.get("placement")
+        if isinstance(placement, dict):
+            ptype = placement.get("type")
+            if isinstance(ptype, str) and ptype.startswith(_MSL_PREFIX):
+                schema_file = _MSL_PLACEMENT_SCHEMAS.get(ptype)
+                if schema_file is None:
+                    print(f"  [{subdir}] {rel} @ placement > type")
+                    print(f"    unknown MSL structure placement type {ptype!r}")
+                    errors += 1
+                else:
+                    errors += _validate_against(schema_file, placement, subdir, rel, "placement")
+
+    return errors
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
@@ -64,6 +162,11 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                 print(f"  [{subdir}] {rel} @ {path_str}")
                 print(f"    {error.message}")
                 error_count += 1
+                failed = True
+
+            msl_errors = _check_msl_types(subdir, rel, data)
+            if msl_errors:
+                error_count += msl_errors
                 failed = True
 
     total = sum(counts.values())
