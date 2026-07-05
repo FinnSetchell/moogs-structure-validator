@@ -1,5 +1,29 @@
 # changelog
 
+## v1.8.0 -- 2026-07-05
+
+MSL compatibility coverage pass. Every datapack-facing extension in MoogsStructureLib (surveyed from the 26.1.0-26.1.2 branch; 26.2.0 has no datapack-facing changes) is now inspected and validated.
+
+### Fixed
+- msl_generic_jigsaw_structure / msl_generic_nether_jigsaw_structure schemas capped `size` at 30; MSL's codec allows 0-128 (its raised piece cap). Sizes 31-128 no longer fail.
+- nether jigsaw `land_search_direction` was missing the `FIXED_HEIGHT` enum value.
+
+### Added
+- check_worldgen_schemas now dispatches MSL type-specific schemas that previously existed but were never applied: structure files by `type`, template pool elements by `element_type` (recursing into list elements), structure set placements by `placement.type`, and processor list entries by `processor_type`. Unknown `moogs_structures:*` ids in any of these positions are flagged as typos.
+- schemas/msl_processors.json -- field shapes, required vs optional, and value ranges for all 10 MSL processors (pillar, spawner_randomizing, trial_spawner_randomizing, vault_randomizing, equip_armor_stand, close_off_fluid_sources, remove_floating_blocks, super_gravity, flood_with_water, random_replace_with_properties), taken from the 26.1 codecs.
+- schemas/msl_enhanced_terrain_adaptation.json -- kernel fields, carve/bury/none actions, padding, and the band restriction; applied on the nether jigsaw structure and as the per-element override on versioned and mirroring pool elements (schemas support local file $ref inlining now).
+- check_processor_rules cross-checks MSL processor references: spawner `weighted_entities` against the entity registry, vault key items against the item registry, project-local loot table and trial_spawner config refs against the datapack, and min_spawn_delay vs max_spawn_delay. The check now FAILS on findings (was warn-only) and block ids honour `extra_ids`.
+- check_spawn_counts -- new check for `msl_pieces_spawn_counts` and `msl_pieces_spawn_counts_additions` files: entry shape, the always_spawn_this_many <= never_spawn_more_than_this_many constraint MSL errors on at load, file id resolving to a structure in the project, and nbt_piece_name refs resolving to template NBTs.
+- check_msl_structure_tags -- new check for `no_basalt` / `no_delta` / `larger_locate_search` tag files under data/moogs_structures; unknown tag names flagged as typos, own-namespace structure ids must resolve.
+- inverted `y_allowance` ranges (max_y_allowed < min_y_allowed) on MSL structures are flagged; MSL hard-crashes at datapack load on these.
+
+### Removed
+- schemas/msl_extensions.json -- stale doc stub with the wrong `msl:` namespace that nothing loaded.
+
+### Tests
+- 42 new tests across test_worldgen_schemas.py, test_processor_rules.py, test_spawn_counts.py, test_msl_structure_tags.py. Suite total: 94.
+- Verified against MoogsNetherStructures2 and MoogsVoyagerStructures `1.21-datapack`: zero new findings on known-good packs, with the dispatch exercised (52 MSL structures, 7 MSL processor lists, 84 versioned pools, 2 tag files in MNS2).
+
 ## v1.7.1 -- 2026-07-05
 
 ### Added

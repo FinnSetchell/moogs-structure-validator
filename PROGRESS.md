@@ -38,4 +38,16 @@
 - [x] `checks/check_entity_nbt_keys.py` -- range-aware (min+max, not just min); uses iter_entities for recursion
 - [x] `tests/nbt_helpers.py`, `tests/test_fixtures_end_to_end.py` -- fixture-based end-to-end tests (17 new, 41 total in suite)
 
+## v1.8.0 additions (2026-07-05)
+- [x] MSL source survey (branch 26.1.0-26.1.2; 26.2.0 confirmed identical datapack-wise) -- all 10 processors, 3 pool element types, 2 structure types, spawn counts format, structure tags
+- [x] schema fixes: `size` cap 0-128, `FIXED_HEIGHT` land search direction
+- [x] `checks/check_worldgen_schemas.py` -- MSL type dispatch (structures, pool elements, placements, processors); unknown moogs_structures ids flagged; local $ref inlining
+- [x] `schemas/msl_processors.json` + `schemas/msl_blockstate.json` -- per-processor field schemas
+- [x] `schemas/msl_enhanced_terrain_adaptation.json` -- shared across nether structure + versioned/mirroring element overrides
+- [x] `checks/check_processor_rules.py` -- entity/item/loot/trial_spawner reference cross-checks; fails on findings
+- [x] `checks/check_spawn_counts.py` -- msl_pieces_spawn_counts + _additions validation
+- [x] `checks/check_msl_structure_tags.py` -- no_basalt / no_delta / larger_locate_search tag validation
+- [x] inverted y_allowance detection
+- [x] 42 new tests (94 total); clean delta on MNS2 + MVS 1.21-datapack
+
 ## Pending
