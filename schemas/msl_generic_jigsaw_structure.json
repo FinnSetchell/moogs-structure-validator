@@ -22,9 +22,9 @@
     },
     "size": {
       "type": "integer",
-      "description": "Jigsaw expansion depth. Must be between 0 and 30.",
+      "description": "Jigsaw expansion depth. MSL raises the vanilla cap: must be between 0 and 128.",
       "minimum": 0,
-      "maximum": 30
+      "maximum": 128
     },
     "start_height": {
       "description": "HeightProvider controlling the Y position the structure starts generating at."

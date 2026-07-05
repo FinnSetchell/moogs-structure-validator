@@ -22,17 +22,17 @@
     },
     "size": {
       "type": "integer",
-      "description": "Jigsaw expansion depth. Must be between 0 and 30.",
+      "description": "Jigsaw expansion depth. MSL raises the vanilla cap: must be between 0 and 128.",
       "minimum": 0,
-      "maximum": 30
+      "maximum": 128
     },
     "start_height": {
       "description": "HeightProvider controlling the initial Y position before the land search is applied."
     },
     "land_search_direction": {
       "type": "string",
-      "enum": ["HIGHEST_LAND", "LOWEST_LAND"],
-      "description": "Whether to anchor the structure to the highest or lowest land surface found within the bounding box."
+      "enum": ["HIGHEST_LAND", "LOWEST_LAND", "FIXED_HEIGHT"],
+      "description": "Whether to anchor the structure to the highest or lowest land surface found within the bounding box. FIXED_HEIGHT skips the land search and places the base at start_height plus ledge_offset_y."
     },
     "y_allowance": {
       "type": "object",
