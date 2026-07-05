@@ -89,6 +89,7 @@ def _check_modules():
     import checks.check_book_contents as check_book_contents
     import checks.check_text_components as check_text_components
     import checks.check_attribute_ids as check_attribute_ids
+    import checks.check_potion_effects as check_potion_effects
 
     return [
         ("check_directory_names", check_directory_names),
@@ -108,6 +109,7 @@ def _check_modules():
         ("check_processor_rules", check_processor_rules),
         ("check_item_format", check_item_format),
         ("check_book_contents", check_book_contents),
+        ("check_potion_effects", check_potion_effects),
         ("check_entity_equipment_shape", check_entity_equipment_shape),
         ("check_attribute_ids", check_attribute_ids),
         ("check_entity_nbt_keys", check_entity_nbt_keys),
