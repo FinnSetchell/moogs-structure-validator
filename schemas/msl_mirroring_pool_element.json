@@ -30,6 +30,7 @@
     "override_liquid_settings": {
       "type": "string",
       "enum": ["apply_waterlogging", "ignore_waterlogging"]
-    }
+    },
+    "enhanced_terrain_adaptation": { "$ref": "msl_enhanced_terrain_adaptation.json" }
   }
 }

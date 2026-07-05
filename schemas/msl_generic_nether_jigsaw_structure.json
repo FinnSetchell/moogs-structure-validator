@@ -86,6 +86,7 @@
       "type": "string",
       "enum": ["apply_waterlogging", "ignore_waterlogging"],
       "description": "Controls waterlogging behaviour during structure placement."
-    }
+    },
+    "enhanced_terrain_adaptation": { "$ref": "msl_enhanced_terrain_adaptation.json" }
   }
 }

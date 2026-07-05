@@ -39,10 +39,22 @@ _MSL_PLACEMENT_SCHEMAS: dict[str, str] = {
 _schema_cache: dict[str, dict] = {}
 
 
+def _resolve_local_refs(node):
+    """Inline {"$ref": "<file>.json"} nodes pointing at sibling schema files."""
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.endswith(".json"):
+            return _load_schema(ref)
+        return {k: _resolve_local_refs(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_resolve_local_refs(x) for x in node]
+    return node
+
+
 def _load_schema(filename: str) -> dict:
     if filename not in _schema_cache:
         with (_SCHEMAS_DIR / filename).open() as f:
-            _schema_cache[filename] = json.load(f)
+            _schema_cache[filename] = _resolve_local_refs(json.load(f))
     return _schema_cache[filename]
 
 

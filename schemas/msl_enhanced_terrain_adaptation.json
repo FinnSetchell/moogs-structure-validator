@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "MSL enhanced terrain adaptation",
+  "description": "Gaussian-kernel terrain adaptation applied around structure pieces. Appears on the nether jigsaw structure and as a per-element override on versioned and mirroring pool elements.",
+  "type": "object",
+  "required": ["kernel_size", "kernel_distance", "top", "bottom"],
+  "properties": {
+    "kernel_size": {
+      "type": "integer",
+      "description": "Edge length of the 3-D falloff kernel in blocks. 0 disables adaptation.",
+      "minimum": 0
+    },
+    "kernel_distance": {
+      "type": "integer",
+      "description": "Distance divisor controlling how quickly the kernel falls off.",
+      "minimum": 0
+    },
+    "top": {
+      "type": "string",
+      "enum": ["carve", "bury", "none"],
+      "description": "Terrain action applied above the piece base: carve removes terrain, bury adds it."
+    },
+    "bottom": {
+      "type": "string",
+      "enum": ["carve", "bury", "none"],
+      "description": "Terrain action applied below the piece base."
+    },
+    "bottom_offset": {
+      "type": "number",
+      "description": "Y offset applied to the piece base before deciding top vs bottom. Defaults to 0."
+    },
+    "padding": {
+      "type": "object",
+      "description": "Expands or shrinks the piece bounding box per axis before adapting terrain. All fields default to 0.",
+      "properties": {
+        "x":      { "type": "integer" },
+        "top":    { "type": "integer" },
+        "bottom": { "type": "integer" },
+        "z":      { "type": "integer" }
+      }
+    },
+    "band": {
+      "type": "object",
+      "description": "Restricts adaptation to a vertical band of each piece in piece-local rows (0 = piece floor). When present, top/bottom padding is ignored.",
+      "required": ["bottom", "top"],
+      "properties": {
+        "bottom": {
+          "type": "integer",
+          "description": "Lowest piece-local row the adaptation applies to."
+        },
+        "top": {
+          "type": "integer",
+          "description": "Highest piece-local row the adaptation applies to."
+        },
+        "piece_heights": {
+          "type": "array",
+          "description": "If set, the band only applies to rigid pieces whose Y span matches one of these heights.",
+          "items": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

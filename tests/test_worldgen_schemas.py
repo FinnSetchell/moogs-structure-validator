@@ -122,6 +122,59 @@ def test_mirroring_element_bad_mirror_fails(tmp_path):
     assert not passed
 
 
+def test_enhanced_terrain_adaptation_valid_passes(tmp_path):
+    element = {
+        "element_type": "moogs_structures:versioned_single_pool_element",
+        "location": "test:a",
+        "projection": "rigid",
+        "processors": "minecraft:empty",
+        "enhanced_terrain_adaptation": {
+            "kernel_size": 5,
+            "kernel_distance": 8,
+            "top": "carve",
+            "bottom": "bury",
+            "band": {"bottom": 0, "top": 3, "piece_heights": [24, 25, 27]},
+        },
+    }
+    _write(tmp_path, "test", "template_pool", "p.json", _pool([element]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
+def test_enhanced_terrain_adaptation_bad_action_fails(tmp_path):
+    element = {
+        "element_type": "moogs_structures:versioned_single_pool_element",
+        "location": "test:a",
+        "projection": "rigid",
+        "enhanced_terrain_adaptation": {
+            "kernel_size": 5,
+            "kernel_distance": 8,
+            "top": "smooth",
+            "bottom": "none",
+        },
+    }
+    _write(tmp_path, "test", "template_pool", "p.json", _pool([element]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_enhanced_terrain_adaptation_band_missing_top_fails(tmp_path):
+    data = _generic_structure(
+        type="moogs_structures:moogs_structures_generic_nether_jigsaw_structure",
+        land_search_direction="HIGHEST_LAND",
+        enhanced_terrain_adaptation={
+            "kernel_size": 5,
+            "kernel_distance": 8,
+            "top": "carve",
+            "bottom": "none",
+            "band": {"bottom": 0},
+        },
+    )
+    _write(tmp_path, "test", "structure", "s.json", data)
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
 def test_advanced_random_spread_missing_salt_fails(tmp_path):
     data = {
         "structures": [{"structure": "test:s", "weight": 1}],
