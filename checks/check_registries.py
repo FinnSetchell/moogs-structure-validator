@@ -41,6 +41,18 @@ def _collect_ids(node: object, items: set[str], blocks: set[str]) -> None:
             if isinstance(name, str) and ":" in name:
                 items.add(name)
 
+            # set_contents/give_item and similar: nested item entries under `entries`
+            # or a direct `item` field with an id.
+            if func.endswith(":set_contents") or func.endswith(":give_item"):
+                item = node.get("item")
+                if isinstance(item, dict):
+                    for key in ("id", "name"):
+                        val = item.get(key)
+                        if isinstance(val, str) and ":" in val:
+                            items.add(val)
+                elif isinstance(item, str) and ":" in item:
+                    items.add(item)
+
         for val in node.values():
             _collect_ids(val, items, blocks)
 

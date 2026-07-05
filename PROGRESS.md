@@ -19,5 +19,21 @@
 - [x] MBS `release.yml` updated to use moogs-structure-validator; publish blocked on validate
 - [x] Tagged `v1` on moogs-structure-validator
 
+## v1.7.0 additions (2026-07-05)
+- [x] `utils/nbt_versions.py` extended: `_build_nbt_version_ranges` returning (min, max) per NBT; `collect_versioned_elements` for coverage inspection
+- [x] `utils/boundaries.py` -- named DataVersion boundaries + `side_of` helper (OLD/NEW/SPANS)
+- [x] `utils/entity_walk.py` -- iterates every entity including Passengers + spawner-nested SpawnData/SpawnPotentials
+- [x] `registries/fetcher.py.fetch_registry_set` for on-demand mob_effect/enchantment sets
+- [x] `checks/check_version_coverage.py` -- new coverage check
+- [x] `checks/check_book_contents.py` -- new book component check
+- [x] `checks/check_text_components.py` -- new JSON/SNBT text component check at 1.21.5
+- [x] `checks/check_entity_nbt.py` -- adds recursion, mob-effect boundary, DataVersion FAIL on wired mismatch
+- [x] `checks/check_entity_equipment_shape.py` -- full forbidden-keys set both sides + SPANS + item-id validation
+- [x] `checks/check_item_format.py` -- walks block-entity items; enchantments-shape check across three eras
+- [x] `checks/check_registries.py._collect_ids` -- handles set_contents / give_item
+
 ## Pending
-- [ ] Extend `check_registries._collect_ids` with additional item locations (set_contents, give_item, etc.) as further gaps surface during real releases
+- [ ] Pytest scaffolding + hand-built fixtures for each new failure mode
+- [ ] Attribute prefix rules at 1.21.2 (generic./player./zombie.) on entity `Attributes`/`attributes`
+- [ ] custom_potion_effects vs potion_contents.custom_effects on potion/arrow items and area_effect_cloud
+- [ ] Per-mob key rules integration with min+max version ranges (currently `check_entity_nbt_keys` uses only min)

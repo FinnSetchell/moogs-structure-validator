@@ -85,22 +85,28 @@ def _check_modules():
     import checks.check_entity_equipment_shape as check_entity_equipment_shape
     import checks.check_entity_nbt_keys as check_entity_nbt_keys
     import checks.check_no_spawn_eggs as check_no_spawn_eggs
+    import checks.check_version_coverage as check_version_coverage
+    import checks.check_book_contents as check_book_contents
+    import checks.check_text_components as check_text_components
 
     return [
         ("check_directory_names", check_directory_names),
         ("nbt_check", nbt_check),
         ("check_data_integrity", check_data_integrity),
+        ("check_version_coverage", check_version_coverage),
         ("check_loot_tables", check_loot_tables),
         ("check_loot_table_schemas", check_loot_table_schemas),
         ("check_registries", check_registries),
         ("check_worldgen_schemas", check_worldgen_schemas),
         ("check_entity_nbt", check_entity_nbt),
         ("check_sign_nbt", check_sign_nbt),
+        ("check_text_components", check_text_components),
         ("check_biome_tags", check_biome_tags),
         ("check_containers", check_containers),
         ("check_jigsaw_pools", check_jigsaw_pools),
         ("check_processor_rules", check_processor_rules),
         ("check_item_format", check_item_format),
+        ("check_book_contents", check_book_contents),
         ("check_entity_equipment_shape", check_entity_equipment_shape),
         ("check_entity_nbt_keys", check_entity_nbt_keys),
         ("check_no_spawn_eggs", check_no_spawn_eggs),

@@ -63,12 +63,12 @@ def check_item_era(
 
     if file_dv < ITEM_FORMAT_DV and has_components:
         return (
-            f"[ERROR] {rel}: entity {entity_id!r} has `components` on item in {slot_desc}"
+            f"[ERROR] {rel}: {slot_desc} ({entity_id!r}) has `components` on item"
             f" (min target {file_version} is pre-1.20.5; use `tag` not `components`)"
         )
     if file_dv >= ITEM_FORMAT_DV and has_tag:
         return (
-            f"[ERROR] {rel}: entity {entity_id!r} has legacy `tag` on item in {slot_desc}"
+            f"[ERROR] {rel}: {slot_desc} ({entity_id!r}) has legacy `tag` on item"
             f" (min target {file_version} is 1.20.5+; use `components` not `tag`)"
         )
     return None

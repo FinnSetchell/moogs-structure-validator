@@ -2,3 +2,4 @@ nbtlib
 jsonschema
 referencing
 requests
+pytest

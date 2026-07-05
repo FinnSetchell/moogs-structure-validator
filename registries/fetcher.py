@@ -44,3 +44,11 @@ def fetch_registries(
     valid_entities = set().union(*entities_per_version) if entities_per_version else set()
 
     return valid_items, valid_blocks, valid_entities
+
+
+def fetch_registry_set(
+    version: str, cache_dir: pathlib.Path, refresh: bool, key: str
+) -> set[str]:
+    """Return `minecraft:` ids for one registry key (e.g. 'mob_effect', 'enchantment')."""
+    data = _fetch_version(version, cache_dir, refresh)
+    return {"minecraft:" + n for n in data.get(key, [])}
