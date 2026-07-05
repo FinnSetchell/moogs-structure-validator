@@ -91,6 +91,7 @@ def _check_modules():
     import checks.check_attribute_ids as check_attribute_ids
     import checks.check_potion_effects as check_potion_effects
     import checks.check_spawn_counts as check_spawn_counts
+    import checks.check_msl_structure_tags as check_msl_structure_tags
 
     return [
         ("check_directory_names", check_directory_names),
@@ -109,6 +110,7 @@ def _check_modules():
         ("check_jigsaw_pools", check_jigsaw_pools),
         ("check_processor_rules", check_processor_rules),
         ("check_spawn_counts", check_spawn_counts),
+        ("check_msl_structure_tags", check_msl_structure_tags),
         ("check_item_format", check_item_format),
         ("check_book_contents", check_book_contents),
         ("check_potion_effects", check_potion_effects),
