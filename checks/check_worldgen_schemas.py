@@ -58,9 +58,11 @@ def _load_schema(filename: str) -> dict:
     return _schema_cache[filename]
 
 
-def _validate_against(filename: str, data: dict, subdir: str, rel, where: str) -> int:
+def _validate_against(schema: str | dict, data: dict, subdir: str, rel, where: str) -> int:
     """Validate data against a type-specific schema; print and count errors."""
-    validator = jsonschema.Draft4Validator(_load_schema(filename))
+    if isinstance(schema, str):
+        schema = _load_schema(schema)
+    validator = jsonschema.Draft4Validator(schema)
     errors = sorted(validator.iter_errors(data), key=lambda e: list(e.path))
     for error in errors:
         path_str = " > ".join(str(p) for p in error.absolute_path) if error.absolute_path else where
@@ -119,6 +121,23 @@ def _check_msl_types(subdir: str, rel, data: dict) -> int:
                     errors += 1
                 else:
                     errors += _validate_against(schema_file, element, subdir, rel, where)
+
+    elif subdir == "processor_list":
+        processors = data.get("processors")
+        if isinstance(processors, list):
+            proc_schemas = _load_schema("msl_processors.json")
+            for i, proc in enumerate(processors):
+                if not isinstance(proc, dict):
+                    continue
+                ptype = proc.get("processor_type")
+                if isinstance(ptype, str) and ptype.startswith(_MSL_PREFIX):
+                    schema = proc_schemas.get(ptype)
+                    if schema is None:
+                        print(f"  [{subdir}] {rel} @ processors > {i}")
+                        print(f"    unknown MSL processor type {ptype!r}")
+                        errors += 1
+                    else:
+                        errors += _validate_against(schema, proc, subdir, rel, f"processors > {i}")
 
     elif subdir == "structure_set":
         placement = data.get("placement")

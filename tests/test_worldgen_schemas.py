@@ -175,6 +175,119 @@ def test_enhanced_terrain_adaptation_band_missing_top_fails(tmp_path):
     assert not passed
 
 
+def _processor_list(processors: list[dict]) -> dict:
+    return {"processors": processors}
+
+
+def test_spawner_processor_valid_passes(tmp_path):
+    proc = {
+        "processor_type": "moogs_structures:spawner_randomizing_processor",
+        "weighted_entities": [
+            {"entity": "minecraft:zombie", "weight": 3},
+            {"entity": "minecraft:skeleton", "weight": 1, "nbt": {}},
+        ],
+        "spawn_count": 4,
+    }
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
+def test_spawner_processor_missing_entities_fails(tmp_path):
+    proc = {
+        "processor_type": "moogs_structures:spawner_randomizing_processor",
+        "delay": 20,
+    }
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_spawner_processor_zero_weight_fails(tmp_path):
+    proc = {
+        "processor_type": "moogs_structures:spawner_randomizing_processor",
+        "weighted_entities": [{"entity": "minecraft:zombie", "weight": 0}],
+    }
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_unknown_msl_processor_type_fails(tmp_path):
+    proc = {"processor_type": "moogs_structures:spawner_randomising_processor"}
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_pillar_processor_valid_passes(tmp_path):
+    proc = {
+        "processor_type": "moogs_structures:pillar_processor",
+        "pillar_trigger_and_replacements": [
+            {
+                "trigger": {"Name": "minecraft:yellow_wool"},
+                "replacement": {"Name": "minecraft:basalt", "Properties": {"axis": "y"}},
+            },
+        ],
+        "direction": "down",
+        "pillar_state_randomizer": {
+            "entries": [
+                {"block": {"Name": "minecraft:magma_block"}, "probability": 0.25, "max_y": 40},
+            ],
+            "default": {"Name": "minecraft:basalt"},
+        },
+    }
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
+def test_pillar_processor_bad_direction_fails(tmp_path):
+    proc = {
+        "processor_type": "moogs_structures:pillar_processor",
+        "pillar_trigger_and_replacements": [
+            {"trigger": {"Name": "minecraft:yellow_wool"}, "replacement": {"Name": "minecraft:basalt"}},
+        ],
+        "direction": "downward",
+    }
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_vault_processor_missing_loot_table_fails(tmp_path):
+    proc = {
+        "processor_type": "moogs_structures:vault_randomizing_processor",
+        "key_item": "minecraft:trial_key",
+    }
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_flood_processor_valid_passes(tmp_path):
+    procs = [
+        {"processor_type": "moogs_structures:flood_with_water_processor", "flood_level": 62},
+        {"processor_type": "moogs_structures:remove_floating_blocks_processor"},
+        {"processor_type": "minecraft:rule", "rules": []},
+    ]
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list(procs))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
+def test_random_replace_probability_out_of_range_fails(tmp_path):
+    proc = {
+        "processor_type": "moogs_structures:random_replace_with_properties_processor",
+        "input_block": "minecraft:stone",
+        "output_block": "minecraft:cobblestone",
+        "probability": 1.5,
+    }
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
 def test_advanced_random_spread_missing_salt_fails(tmp_path):
     data = {
         "structures": [{"structure": "test:s", "weight": 1}],

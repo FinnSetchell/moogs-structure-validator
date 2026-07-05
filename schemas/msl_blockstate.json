@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "Serialized block state",
+  "description": "Vanilla BlockState codec form: a Name plus optional string-valued Properties.",
+  "type": "object",
+  "required": ["Name"],
+  "properties": {
+    "Name": {
+      "type": "string",
+      "pattern": "^([a-z0-9_.-]+:)?[a-z0-9_./-]+$"
+    },
+    "Properties": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  }
+}
