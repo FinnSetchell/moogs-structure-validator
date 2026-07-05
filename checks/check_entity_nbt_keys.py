@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING
 
 import nbtlib
 
+from utils.entity_walk import iter_entities
 from utils.nbt_cache import load_nbt
-from utils.nbt_versions import _build_nbt_min_versions, _parse_version
+from utils.nbt_versions import _build_nbt_version_ranges, _parse_version
 from utils.paths import data_dir
 from utils.versions import load_version_map
 
@@ -23,10 +24,13 @@ def _load_key_table() -> dict[str, dict[str, dict]]:
     return {k: v for k, v in raw.items() if not k.startswith("_")}
 
 
+def _dv_name(version_map: dict[str, int], dv: int) -> str:
+    return next((k for k, v in version_map.items() if v == dv), str(dv))
+
+
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
     namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
     structures_dir = data_dir(namespace_root, "structure")
-
     if not structures_dir.exists():
         return True, "no structures directory"
 
@@ -36,12 +40,14 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     version_map = load_version_map(cache_dir, ctx.refresh)
 
     global_min_version = min(ctx.mc_versions, key=_parse_version)
+    global_max_version = max(ctx.mc_versions, key=_parse_version)
 
-    nbt_min_versions: dict[Path, str] = {}
+    nbt_ranges = {}
     template_pool_dir = namespace_root / "worldgen" / "template_pool"
     if template_pool_dir.exists():
-        nbt_min_versions = _build_nbt_min_versions(
-            template_pool_dir, structures_dir, ctx.namespace, global_min_version, ctx.mc_versions
+        nbt_ranges = _build_nbt_version_ranges(
+            template_pool_dir, structures_dir, ctx.namespace, global_min_version,
+            ctx.mc_versions, global_max_version,
         )
 
     errors: list[str] = []
@@ -60,15 +66,15 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         files_checked += 1
         rel = str(nbt_path.relative_to(structures_dir))
 
-        file_version = nbt_min_versions.get(nbt_path, global_min_version)
-        file_dv = version_map.get(file_version)
-        if file_dv is None:
+        info = nbt_ranges.get(nbt_path)
+        file_min = info.min_version if info else global_min_version
+        file_max = info.max_version if info else global_max_version
+        file_min_dv = version_map.get(file_min)
+        file_max_dv = version_map.get(file_max)
+        if file_min_dv is None or file_max_dv is None:
             continue
 
-        for entity_entry in nbt.get("entities") or []:
-            entity_nbt = entity_entry.get("nbt")
-            if not isinstance(entity_nbt, nbtlib.Compound):
-                continue
+        for entity_nbt, entity_path in iter_entities(nbt):
             id_tag = entity_nbt.get("id")
             if id_tag is None:
                 continue
@@ -87,24 +93,46 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                 max_dv = constraints.get("max_dv")
                 note = constraints.get("note", "")
 
-                if min_dv is not None and file_dv < min_dv:
-                    errors.append(
-                        f"[ERROR] {rel}: entity {entity_id!r} has key {key!r} which requires"
-                        f" DV >= {min_dv} but file targets {file_version} (DV {file_dv})."
-                        + (f" {note}" if note else "")
-                    )
-                elif max_dv is not None and file_dv > max_dv:
-                    errors.append(
-                        f"[ERROR] {rel}: entity {entity_id!r} has key {key!r} which is only"
-                        f" valid through DV {max_dv} but file targets {file_version} (DV {file_dv})."
-                        + (f" {note}" if note else "")
-                    )
+                # Key valid DV window is [min_dv or -inf, max_dv or +inf].
+                # File range must fit entirely inside that window.
+                if min_dv is not None and file_min_dv < min_dv:
+                    if file_max_dv < min_dv:
+                        # entire range too old
+                        errors.append(
+                            f"[ERROR] {rel}: {entity_path} ({entity_id!r}) has key {key!r}"
+                            f" which requires DV >= {min_dv} but wired range"
+                            f" {file_min}..{file_max} is entirely older."
+                            + (f" {note}" if note else "")
+                        )
+                    else:
+                        # range spans the min boundary
+                        errors.append(
+                            f"[ERROR] {rel}: {entity_path} ({entity_id!r}) has key {key!r}"
+                            f" which requires DV >= {min_dv} ({_dv_name(version_map, min_dv)})"
+                            f" but wired range {file_min}..{file_max} spans that boundary."
+                            + (f" {note}" if note else "")
+                        )
+                elif max_dv is not None and file_max_dv > max_dv:
+                    if file_min_dv > max_dv:
+                        errors.append(
+                            f"[ERROR] {rel}: {entity_path} ({entity_id!r}) has key {key!r}"
+                            f" which is only valid through DV {max_dv} but wired range"
+                            f" {file_min}..{file_max} is entirely newer."
+                            + (f" {note}" if note else "")
+                        )
+                    else:
+                        errors.append(
+                            f"[ERROR] {rel}: {entity_path} ({entity_id!r}) has key {key!r}"
+                            f" which is only valid through DV {max_dv} ({_dv_name(version_map, max_dv)})"
+                            f" but wired range {file_min}..{file_max} spans that boundary."
+                            + (f" {note}" if note else "")
+                        )
 
     for msg in errors:
         print(f"  {msg}")
 
     if not errors:
-        print(f"  {files_checked} file(s), {entities_checked} entity/entities checked — all valid")
+        print(f"  {files_checked} file(s), {entities_checked} entity/entities checked -- all valid")
 
     if errors:
         return False, f"{len(errors)} nbt key error(s)"
