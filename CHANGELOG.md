@@ -1,5 +1,16 @@
 # changelog
 
+## v1.8.1 -- 2026-07-06
+
+### Fixed
+- check_sign_nbt no longer trusts the source NBT's `DataVersion` as a signal for "what schema this file contains". Structures in Moog's mods are saved on the newest MC release and downgraded manually per-version, so the file DV routinely sits above 1.20.5 even when the palette content targets 1.20.1. The old DV floor (`if nbt.DataVersion < 3836: continue`) silently skipped these files. Now the check gates only on the mod's wired target range (`file_min_dv`) and inspects each sign block entity structurally. Detection of the new bare-string message format was also tightened: pre-1.20.5 sign messages are JSON-encoded text components (`"text"`, `{"text":"foo"}`, `[...]`), so a message is treated as bare only when it fails to JSON-parse (or is the empty string). The previous heuristic (`not startswith('"')`) false-positived on `{"text":""}` style pre-1.20.5 messages once the DV floor was lifted.
+
+### Audited (no change needed)
+- check_item_format, check_entity_equipment_shape, check_attribute_ids, check_entity_nbt_keys, check_entity_nbt: reviewed for the same class of bug. All already gate structural checks on the wired mod target range (`file_min_dv`/`file_max_dv` from `_build_nbt_version_ranges`), not on the source NBT's `DataVersion`. `check_entity_nbt` uses source DV only for informational drift reporting.
+
+### Context
+- Escape that motivated this: MoogsVoyagerStructures issue #85. Three houses (`diorite_and_deepslate_house`, `mud_brick_house_1`, `prismarine_house_1`) were saved with DV 3465 (1.20.1) but contained the 1.20.5+ two-sided sign format with bare empty messages. Chunk generation crashed on 1.20.1; validator reported PASS because the DV floor skipped the files before the structural check ran.
+
 ## v1.8.0 -- 2026-07-05
 
 MSL compatibility coverage pass. Every datapack-facing extension in MoogsStructureLib (surveyed from the 26.1.0-26.1.2 branch; 26.2.0 has no datapack-facing changes) is now inspected and validated.

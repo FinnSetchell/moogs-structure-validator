@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -61,9 +62,10 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
         rel = str(nbt_path.relative_to(structures_dir))
 
-        dv_tag = nbt.get("DataVersion")
-        if dv_tag is None or int(dv_tag) < _SIGN_FORMAT_DV:
-            continue
+        # Do NOT gate on nbt["DataVersion"] here. Structures are typically saved on the newest
+        # MC release and downgraded manually per-version, so the source DV does not reflect what
+        # schema the palette actually contains. Gate on the mod's wired target range below, and
+        # detect the new sign format structurally on each block entity.
 
         file_min_version = nbt_min_versions.get(nbt_path, global_min_version)
         file_min_dv = version_map.get(file_min_version)
@@ -106,7 +108,16 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                     continue
                 for msg in messages:
                     msg_str = str(msg)
-                    if msg_str == "" or not msg_str.startswith('"'):
+                    # Pre-1.20.5 sign messages are JSON-encoded text components:
+                    # `"plain text"`, `{"text":"foo"}`, `[...]`. Post-1.20.5 they are
+                    # bare Python strings (`""`, `hello`). Treat anything that fails to
+                    # json-parse as the bare (post-1.20.5) form.
+                    try:
+                        json.loads(msg_str) if msg_str else None
+                        is_bare = msg_str == ""
+                    except (ValueError, TypeError):
+                        is_bare = True
+                    if is_bare:
                         errors.append(
                             f"[ERROR] {rel}: sign {face} has bare string message"
                             f" (new sign format, incompatible with min target {file_min_version})"
