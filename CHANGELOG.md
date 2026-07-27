@@ -1,5 +1,41 @@
 # changelog
 
+## v1.8.2 -- 2026-07-27
+
+### Fixed
+- check_attribute_ids raised a false `unknown attribute id` error for every attribute modifier on every naturally-spawned mob captured into a structure. `_iter_entity_attribute_ids` descended into `attributes[i].modifiers[j].id` and validated those ids against the `attribute` registry. Since 1.21, `modifiers[].id` is not an attribute id -- it is the *modifier's own* resource location, the identity the game uses to add/remove/stack that modifier. Vanilla writes `minecraft:random_spawn_bonus` there when a mob spawns naturally (on `follow_range`), plus ids like `minecraft:leader_zombie_bonus`. None of those live in the `attribute` registry, and there is no attribute-modifier registry in any version (verified against the 1.21 / 1.21.2 / 1.21.5 / 1.21.9 / 26.2 registry summaries), so the lookup could never succeed. Modifier ids are now skipped -- they cannot be validated against anything, and the comment in the source says so. The legacy `Attributes` branch of the same function never descended into `Modifiers`; the asymmetry was the tell that this was an oversight rather than intent.
+
+Real data that tripped it, from `mss/structure/arena/arena_3.nbt` (DataVersion 4556):
+
+```
+attributes: [
+  { id: "minecraft:follow_range", base: 16.0,
+    modifiers: [ { id: "minecraft:random_spawn_bonus",
+                   amount: 0.0233..., operation: "add_multiplied_base" } ] },
+  { id: "minecraft:movement_speed", base: 0.25 } ]
+```
+
+### Impact
+309 false errors across the fleet's 1.21-datapack branches. Five branches had *only* these and were being blocked from releasing on a validator finding with no defect behind it. Counts are for `check_attribute_ids` alone, before -> after:
+
+| branch (1.21-datapack) | before | after | |
+| --- | ---: | ---: | --- |
+| MoogsMineshaftsReimagined | 20 | 0 | all false |
+| MoogsMissingVillages | 17 | 0 | all false |
+| MoogsSoaringStructures | 28 | 0 | all false |
+| MoogsTemplesReimagined | 120 | 0 | all false |
+| MoogsVoyagerStructures | 96 | 0 | all false |
+| MoogsNetherStructures2 | 55 | 27 | 28 false, 27 genuine and still reported |
+| MoogsEndStructures | 414 | 414 | 0 false, all genuine and still reported |
+
+Every one of the 309 suppressed errors was on a `.modifiers[...]` path; no error on any other path shape changed, and no new errors appeared. The genuine findings that remain are all the real `legacy Attributes list on a min>=1.21 target` shape errors.
+
+### Added
+- `test_attribute_modifier_id_is_not_an_attribute_id` -- a naturally-spawned zombie with a `minecraft:random_spawn_bonus` modifier must pass.
+- `test_bad_attribute_id_still_fails_alongside_a_modifier` -- the same entity plus one genuinely unknown *attribute* id must still fail, with exactly one error. Guards against the over-correction of silencing the parent list along with the modifiers.
+
+Both tests fail on v1.8.1 and pass here. Suite: 96 tests, all green.
+
 ## v1.8.1 -- 2026-07-06
 
 ### Fixed

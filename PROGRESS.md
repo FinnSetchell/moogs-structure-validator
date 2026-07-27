@@ -50,4 +50,8 @@
 - [x] inverted y_allowance detection
 - [x] 42 new tests (94 total); clean delta on MNS2 + MVS 1.21-datapack
 
+## v1.8.2 additions (2026-07-27)
+- [x] `checks/check_attribute_ids.py` -- stop validating `attributes[i].modifiers[j].id` against the `attribute` registry; it is the modifier's own resource location, not an attribute id, and no attribute-modifier registry exists on any version
+- [x] 2 regression tests (96 total); 309 false errors cleared across 6 branches, genuine errors on MNS2 (27) and MES (414) unchanged
+
 ## Pending

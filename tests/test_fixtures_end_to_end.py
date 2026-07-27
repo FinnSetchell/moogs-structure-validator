@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import nbtlib
-from nbtlib import Compound, Int, List, String
+from nbtlib import Compound, Double, Int, List, String
 
 from tests.nbt_helpers import (
     FakeContext,
@@ -273,6 +273,69 @@ def test_attribute_unprefixed_on_pre_1_21_2_fails(tmp_path, monkeypatch):
     ctx = FakeContext("test", ["1.21", "1.21.1"], root)
     passed, _ = mod.run(ctx)
     assert not passed
+
+
+def _spawn_bonus_zombie(bad_attribute_id: str | None = None) -> Compound:
+    """A naturally-spawned zombie as the game actually saves it: follow_range
+    carries a `minecraft:random_spawn_bonus` modifier whose `id` is the
+    MODIFIER's resource location, not an attribute id."""
+    attrs = [
+        Compound({
+            "id": String("minecraft:follow_range"),
+            "base": Double(16.0),
+            "modifiers": List[Compound]([
+                Compound({
+                    "id": String("minecraft:random_spawn_bonus"),
+                    "amount": Double(0.023316965098628625),
+                    "operation": String("add_multiplied_base"),
+                }),
+            ]),
+        }),
+        Compound({"id": String("minecraft:movement_speed"), "base": Double(0.25)}),
+    ]
+    if bad_attribute_id is not None:
+        attrs.append(Compound({"id": String(bad_attribute_id), "base": Double(1.0)}))
+    return Compound({
+        "id": String("minecraft:zombie"),
+        "attributes": List[Compound](attrs),
+    })
+
+
+def test_attribute_modifier_id_is_not_an_attribute_id(tmp_path, monkeypatch):
+    """Regression: `attributes[i].modifiers[j].id` must NOT be looked up in the
+    attribute registry. `minecraft:random_spawn_bonus` is in no registry on any
+    version, so validating it there flagged every naturally-spawned mob."""
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, entities={"minecraft:zombie"},
+                    attributes={"minecraft:follow_range", "minecraft:movement_speed"})
+
+    nbt = structure_nbt(4325, entities=[entity_entry(_spawn_bonus_zombie())])
+    save(nbt, structures / "z.nbt")
+    _wire(pools / "p.json", "test:z", {"1.21.5-1.21.11": "test:z"})
+
+    from checks import check_attribute_ids as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_bad_attribute_id_still_fails_alongside_a_modifier(tmp_path, monkeypatch):
+    """Guard against over-correction: skipping modifier ids must not stop a
+    genuinely unknown ATTRIBUTE id in the same list from being reported."""
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, entities={"minecraft:zombie"},
+                    attributes={"minecraft:follow_range", "minecraft:movement_speed"})
+
+    zombie = _spawn_bonus_zombie(bad_attribute_id="minecraft:not_a_real_attribute")
+    nbt = structure_nbt(4325, entities=[entity_entry(zombie)])
+    save(nbt, structures / "z.nbt")
+    _wire(pools / "p.json", "test:z", {"1.21.5-1.21.11": "test:z"})
+
+    from checks import check_attribute_ids as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, summary = mod.run(ctx)
+    assert not passed
+    assert "1 attribute id error" in summary
 
 
 # ---------- check_potion_effects ----------

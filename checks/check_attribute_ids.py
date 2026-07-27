@@ -31,7 +31,19 @@ def _has_legacy_prefix(bare_id: str) -> bool:
 
 
 def _iter_entity_attribute_ids(entity_nbt: nbtlib.Compound, entity_path: str) -> Iterator[tuple[str, str, str]]:
-    """Yield (id, path, shape) where shape is 'legacy' (Attributes) or 'new' (attributes)."""
+    """Yield (id, path, shape) where shape is 'legacy' (Attributes) or 'new' (attributes).
+
+    Only *attribute* ids are yielded -- i.e. `Attributes[i].Name` and
+    `attributes[i].id`. The nested `attributes[i].modifiers[j].id` is NOT an
+    attribute id: since 1.21 it is the modifier's own resource location (an
+    identity used for add/remove and stacking), e.g. vanilla's
+    `minecraft:random_spawn_bonus` on a naturally-spawned mob's follow_range.
+    Those ids live in no registry at all -- there is no attribute-modifier
+    registry in any version -- so they cannot be validated here, and looking
+    them up in the `attribute` registry flagged every naturally-spawned mob
+    captured into a structure. Skipped deliberately; the legacy `Attributes`
+    branch below has always (correctly) skipped `Modifiers` for the same reason.
+    """
     legacy = entity_nbt.get("Attributes")
     if isinstance(legacy, list):
         for i, entry in enumerate(legacy):
@@ -49,14 +61,7 @@ def _iter_entity_attribute_ids(entity_nbt: nbtlib.Compound, entity_path: str) ->
             id_tag = entry.get("id")
             if id_tag is not None:
                 yield str(id_tag), f"{entity_path}.attributes[{i}].id", "new"
-            modifiers = entry.get("modifiers")
-            if isinstance(modifiers, list):
-                for j, m in enumerate(modifiers):
-                    if not isinstance(m, nbtlib.Compound):
-                        continue
-                    m_id = m.get("id")
-                    if m_id is not None:
-                        yield str(m_id), f"{entity_path}.attributes[{i}].modifiers[{j}].id", "new"
+            # entry["modifiers"][j]["id"] is intentionally not yielded -- see docstring.
 
 
 def _iter_item_attribute_ids(item: nbtlib.Compound, slot_path: str) -> Iterator[tuple[str, str, str]]:
