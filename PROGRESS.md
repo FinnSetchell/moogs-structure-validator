@@ -54,4 +54,10 @@
 - [x] `checks/check_attribute_ids.py` -- stop validating `attributes[i].modifiers[j].id` against the `attribute` registry; it is the modifier's own resource location, not an attribute id, and no attribute-modifier registry exists on any version
 - [x] 2 regression tests (96 total); 309 false errors cleared across 6 branches, genuine errors on MNS2 (27) and MES (414) unchanged
 
+## v1.8.3 additions (2026-07-27)
+- [x] `checks/check_worldgen_schemas.py` -- MSL type validation is MC-version aware; `_MSL_TYPE_WINDOWS` (added_dv, removed_dv) gates types via `utils.versions.load_version_map` + `utils.boundaries.side_of`, the same mechanism `check_entity_equipment_shape` uses. A type is unknown only when no targeted MC version registers it
+- [x] `schemas/msl_processors.json` -- added `moogs_structures:waterlogging_fix_processor` (1.20 line only; `Codec.unit`, no fields)
+- [x] MSL registry survey across all nine branches: only `MoogsStructuresProcessors` differs by version (waterlogging_fix 1.20-only; trial_spawner + vault 1.21+). Structures / pool elements / placements identical everywhere
+- [x] 8 new tests (104 total); MoogsSoaringStructures 1.20-datapack `check_worldgen_schemas` 1 -> 0 errors, all other sections byte-identical
+
 ## Pending

@@ -1,5 +1,52 @@
 # changelog
 
+## v1.8.3 -- 2026-07-27
+
+### Fixed
+- check_worldgen_schemas raised a false `unknown MSL processor type` error for `moogs_structures:waterlogging_fix_processor` on every `1.20-datapack` branch. `schemas/msl_processors.json` was a single flat registry of exactly the ten processor types MSL registers at 1.21+, with no Minecraft-version awareness at all, and `_check_msl_types` flagged anything not in it. But MSL's registries are not stable across MC versions: `MoogsStructuresProcessors` registers **nine** types on the 1.20 line and **ten** from 1.21 onward, and the two sets are not nested. `waterlogging_fix_processor` is real, registered, working content on 1.20-1.20.6 -- it was dropped at 1.21, not never-existed.
+
+Verified by diffing all four MSL modinit registries across the nine live branches (`1.20-1.20.4`, `1.20.5-1.20.6`, `1.21-1.21.1`, `1.21.2-1.21.3`, `1.21.4`, `1.21.5-1.21.10`, `1.21.11`, `26.1.0-26.1.2`, `26.2.0`):
+
+| type | 1.20 line | 1.21+ |
+| --- | :---: | :---: |
+| `waterlogging_fix_processor` | yes | **no** |
+| `trial_spawner_randomizing_processor` | **no** | yes |
+| `vault_randomizing_processor` | **no** | yes |
+| other 8 processors | yes | yes |
+
+`MoogsStructuresStructures`, `MoogsStructuresStructurePieces` (pool elements), `MoogsStructuresPlacements` and `MoogsStructuresStructurePlacementType` are byte-for-byte identical in content on all nine branches -- the structure, element and placement schema registries had no version blindness to fix.
+
+### Changed
+- MSL type validation is now MC-version aware, reusing the mechanism the other version-sensitive checks already use (`utils.versions.load_version_map` for MC version -> DataVersion, `utils.boundaries.side_of` against a named `DV_*` constant -- the same pair `check_entity_equipment_shape` uses for its 1.21.5 boundary). No second version mechanism was introduced.
+- The rule, stated in the source: **a type is reported unknown only when MSL registers it on no version the repo targets.** A branch is one artifact shipped across a whole MC range, so content that works anywhere in that range is content the author meant to write. A `1.20`-`1.20.6` branch is therefore silent about `waterlogging_fix_processor`; a `1.21`+ branch is still told about it, because there it really is dead data; a branch spanning the boundary is silent, because half its target range registers it.
+- Version gating is resolved lazily and only when a version-sensitive type actually appears, and is skipped entirely when the version map is unavailable or a target version is unmapped. Both fallbacks can only under-report -- they can never invent the false positive this release removes.
+- Rejected version-sensitive types now say *why* (`... was removed at 1.21; no targeted MC version registers it`) instead of the flat `unknown MSL processor type`. Genuine typos still get the original message.
+
+### Added
+- `moogs_structures:waterlogging_fix_processor` in `schemas/msl_processors.json`, gated to the 1.20 line. Field shape derived from the class, not guessed: `WaterloggingFixProcessor.CODEC` on MSL `1.20-1.20.4` is `Codec.unit(WaterloggingFixProcessor::new)`, so the processor takes **no** fields -- the only valid JSON is `{"processor_type": "moogs_structures:waterlogging_fix_processor"}`.
+
+### Impact
+`MoogsSoaringStructures` `1.20-datapack`, whose 25 template pools name `mss:waterlogging_fix_processor` as their sole `processors` value, before -> after:
+
+```
+-  FAIL  check_worldgen_schemas         162 files, 1 error(s)
++  PASS  check_worldgen_schemas         162 files, 0 errors
+-  21 passed, 3 failed
++  22 passed, 2 failed
+```
+
+Every other check section is byte-identical; the two remaining failures (`check_entity_equipment_shape`, `check_attribute_ids`) are untouched. Swept every `1.20-datapack` branch in the fleet for the mirror case -- a 1.21-only type on a 1.20 target, which the new gating would newly flag -- and there is none, so this release adds no error anywhere. `MoogsVoyagerStructures-Integrated` `1.20-datapack` carries the same `waterlogging_fix_processor.json` and gains the same clearance.
+
+### Tests
+- `test_waterlogging_processor_passes_on_1_20_repo` -- accepted on a 1.20-only target.
+- `test_waterlogging_processor_fails_on_1_21_repo` -- still exactly one error on a 1.21-only target.
+- `test_waterlogging_processor_passes_on_repo_spanning_1_21` -- the mixed case stays silent.
+- `test_trial_spawner_processor_fails_on_1_20_repo` / `test_trial_spawner_processor_passes_on_1_21_repo` -- the mirror direction.
+- `test_unknown_processor_type_still_fails_on_1_20_repo` -- guards the over-correction: gating must not switch the typo catcher off.
+- `test_version_gating_is_silent_without_a_version_map` / `test_version_gating_is_silent_when_a_target_version_is_unmapped` -- the permissive fallbacks.
+
+Suite: 104 tests, all green.
+
 ## v1.8.2 -- 2026-07-27
 
 ### Fixed

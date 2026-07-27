@@ -194,6 +194,15 @@
     }
   },
 
+  "moogs_structures:waterlogging_fix_processor": {
+    "type": "object",
+    "description": "1.20 line only (MSL branches 1.20-1.20.4 / 1.20.5-1.20.6); dropped at 1.21. CODEC is Codec.unit(WaterloggingFixProcessor::new) -- no fields at all.",
+    "required": ["processor_type"],
+    "properties": {
+      "processor_type": { "type": "string" }
+    }
+  },
+
   "moogs_structures:super_gravity_processor": {
     "type": "object",
     "required": ["processor_type"],

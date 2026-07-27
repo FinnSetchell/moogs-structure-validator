@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tests.nbt_helpers import FakeContext
+from tests.nbt_helpers import FakeContext, stub_registries
 
 from checks import check_worldgen_schemas as mod
 
@@ -300,6 +300,90 @@ def test_random_replace_probability_out_of_range_fails(tmp_path):
     _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
     passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
     assert not passed
+
+
+# --- MC-version gating of MSL types -----------------------------------------
+# MSL registers waterlogging_fix_processor on the 1.20 line only (branches
+# 1.20-1.20.4 and 1.20.5-1.20.6) and dropped it at 1.21; trial_spawner and vault
+# processors are the mirror case, 1.21+ only. A type is "unknown" only when no
+# targeted MC version registers it.
+
+_MC_1_20 = ["1.20", "1.20.1", "1.20.2", "1.20.4", "1.20.5", "1.20.6"]
+_MC_1_21 = ["1.21", "1.21.1"]
+_MC_SPANNING = ["1.20.6", "1.21", "1.21.1"]
+
+_WATERLOGGING = {"processor_type": "moogs_structures:waterlogging_fix_processor"}
+
+
+def test_waterlogging_processor_passes_on_1_20_repo(tmp_path, monkeypatch):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([_WATERLOGGING]))
+    passed, summary = mod.run(FakeContext("test", _MC_1_20, tmp_path))
+    assert passed, summary
+
+
+def test_waterlogging_processor_fails_on_1_21_repo(tmp_path, monkeypatch):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([_WATERLOGGING]))
+    passed, summary = mod.run(FakeContext("test", _MC_1_21, tmp_path))
+    assert not passed
+    assert summary == "1 files, 1 error(s)"
+
+
+def test_waterlogging_processor_passes_on_repo_spanning_1_21(tmp_path, monkeypatch):
+    # 1.20.6 is targeted, and MSL registers it there -- so it is real content.
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([_WATERLOGGING]))
+    passed, summary = mod.run(FakeContext("test", _MC_SPANNING, tmp_path))
+    assert passed, summary
+
+
+def test_trial_spawner_processor_fails_on_1_20_repo(tmp_path, monkeypatch):
+    # Mirror case: added at 1.21, so it is dead data on a 1.20-only branch.
+    stub_registries(monkeypatch)
+    proc = {
+        "processor_type": "moogs_structures:trial_spawner_randomizing_processor",
+        "normal_config": "minecraft:trial_chamber/normal",
+    }
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", _MC_1_20, tmp_path))
+    assert not passed
+
+
+def test_trial_spawner_processor_passes_on_1_21_repo(tmp_path, monkeypatch):
+    stub_registries(monkeypatch)
+    proc = {
+        "processor_type": "moogs_structures:trial_spawner_randomizing_processor",
+        "normal_config": "minecraft:trial_chamber/normal",
+    }
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, summary = mod.run(FakeContext("test", _MC_1_21, tmp_path))
+    assert passed, summary
+
+
+def test_unknown_processor_type_still_fails_on_1_20_repo(tmp_path, monkeypatch):
+    # Guards the over-correction: version gating must not turn the typo catcher off.
+    stub_registries(monkeypatch)
+    proc = {"processor_type": "moogs_structures:waterlogging_fix_processorr"}
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", _MC_1_20, tmp_path))
+    assert not passed
+
+
+def test_version_gating_is_silent_without_a_version_map(tmp_path, monkeypatch):
+    # No version map (offline, or an unrecognised target version) => never gate,
+    # because a wrong guess here is exactly the false positive being fixed.
+    monkeypatch.setattr(mod, "load_version_map", lambda cache_dir, refresh: {})
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([_WATERLOGGING]))
+    passed, summary = mod.run(FakeContext("test", _MC_1_21, tmp_path))
+    assert passed, summary
+
+
+def test_version_gating_is_silent_when_a_target_version_is_unmapped(tmp_path, monkeypatch):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([_WATERLOGGING]))
+    passed, summary = mod.run(FakeContext("test", ["1.21", "26.2"], tmp_path))
+    assert passed, summary
 
 
 def test_advanced_random_spread_missing_salt_fails(tmp_path):
