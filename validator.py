@@ -85,6 +85,7 @@ def _check_modules():
     import checks.check_entity_equipment_shape as check_entity_equipment_shape
     import checks.check_entity_nbt_keys as check_entity_nbt_keys
     import checks.check_no_spawn_eggs as check_no_spawn_eggs
+    import checks.check_no_enchanted_books as check_no_enchanted_books
     import checks.check_version_coverage as check_version_coverage
     import checks.check_book_contents as check_book_contents
     import checks.check_text_components as check_text_components
@@ -118,6 +119,7 @@ def _check_modules():
         ("check_attribute_ids", check_attribute_ids),
         ("check_entity_nbt_keys", check_entity_nbt_keys),
         ("check_no_spawn_eggs", check_no_spawn_eggs),
+        ("check_no_enchanted_books", check_no_enchanted_books),
     ]
 
 
