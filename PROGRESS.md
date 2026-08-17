@@ -1,3 +1,11 @@
+## v1.9.0 additions (2026-08-17)
+- [x] `checks/check_no_enchanted_books.py` -- fails when `minecraft:enchanted_book` appears as a loot-table item entry (the "book vs enchanted_book" bug that silently drops an unenchanted book)
+- [x] `utils/loot_tables.py` -- extracted a generic `iter_matching_loot_entries(json_path, predicate)` walker; `iter_spawn_egg_loot_entries` is now a thin wrapper on top; added `iter_enchanted_book_loot_entries`
+- [x] MSL 3.1.0 support: three new schema types wired into `check_worldgen_schemas` (`vanilla_loot_swap_processor`, `conditional_concentric_rings`, `advanced_random_spread` `+spacing_key/+structure_id`)
+- [x] `checks/check_msl_replace_vanilla.py` -- validates `data/<ns>/moogs_structures/replace_vanilla.json`: presets, `structures` block, stronghold/monument vanilla-tag hookups
+- [x] `checks/check_msl_placements_and_processors.py` -- cross-refs `conditional_concentric_rings` + `vanilla_loot_swap_processor` + `advanced_random_spread` against presets, loot-table registry, container NBTs, and template-pool `processors` wiring
+- [x] `utils/replace_vanilla.py` -- shared parser for `replace_vanilla.json` consumed by both MSL checks
+
 ## Done
 - [x] Created PROGRESS.md, requirements.txt, and README.md scaffolding
 - [x] `validator.py` — entry point: config loading, check orchestration, CLI args; summary table output

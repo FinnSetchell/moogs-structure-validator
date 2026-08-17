@@ -1,5 +1,49 @@
 # changelog
 
+## v1.9.0 -- 2026-08-17
+
+### Added
+- **`check_no_enchanted_books`** -- flags `minecraft:enchanted_book` as a loot-table item entry. This is a common authoring bug: the author writes `enchanted_book` intending to give the player an enchanted book, but enchantments on an `enchanted_book` entry are populated by `enchant_randomly` / `set_enchantments` applied to a **`minecraft:book`** stack, so the raw `enchanted_book` entry drops an unenchanted book at runtime. Walks every `loot_table/**/*.json`, recursing into `entries[]` / `children[]` (groups, alternatives). Fails the check when any entry with `"type": "minecraft:item", "name": "minecraft:enchanted_book"` is found. Loot tables only; container NBTs may legitimately place an enchanted-book item stack directly (enchantments there travel with the item stack).
+
+- **MSL 3.1.0 support.** MSL 3.1.0 adds `moogs_structures:vanilla_loot_swap_processor`, `moogs_structures:conditional_concentric_rings` (structure placement), and two optional fields on `moogs_structures:advanced_random_spread`. The parsers are lenient (warn-and-skip on malformed data), so a broken preset silently disables the feature at runtime; this release closes that gap.
+
+  Schemas (validated by the existing `check_worldgen_schemas`):
+  - `schemas/msl_conditional_concentric_rings.json` -- required: `type`, `salt`, `distance` (0-1023), `spread` (0-1023), `preferred_biomes`, `modid`, `vanilla_key`, `enabled_count` (1-4095), `disabled_count` (0-4095). Optional: `structure_id`, `locate_offset`, `frequency_reduction_method`, `frequency`, `exclusion_zone`. Out-of-range values are hard datapack load errors in MSL, not warn-skips.
+  - `moogs_structures:vanilla_loot_swap_processor` in `schemas/msl_processors.json` -- required: `processor_type`, `modid`, `vanilla_key`, `loot_table_mapping` (non-empty). Optional `seed_strategy` restricted to `{preserve, randomize, clear}`; any other value silently behaves as `preserve` in MSL, so we reject it.
+  - `msl_advanced_random_spread.json` extended with the two runtime-derivable optional fields (`spacing_key`, `structure_id`).
+
+  Two new checks that layer cross-references on top of the schema pass:
+
+  **`check_msl_replace_vanilla`** validates `data/<ns>/moogs_structures/replace_vanilla.json`.
+  - **Presets:** each `id` present, non-empty, and unique in the file (a duplicate silently overwrites the earlier preset in `PRESET_DEFAULTS`); each replacement has `vanilla_key` and `vanilla_structure` (parser skips the whole replacement otherwise -> dead preset); `vanilla_structure` is a known vanilla structure id; `replacement_structure` is present and resolves to `data/<ns>/worldgen/structure/<path>.json` (missing/typo'd -> mixin cancels vanilla but nothing replaces it); `default_enabled` is boolean.
+  - **Structures block:** `preview_url_template` (if set) contains `{structure}`; only `{structure}` and `{mc_version}` are substituted (any other `{token}` is a WARN); `entries[].structure` resolves to a real `structure_set` JSON. WARN when neither `mod_slug` nor `preview_url_template` is set (preview UI disabled). WARN when the file exists but has neither `presets` nor `structures` (no effect).
+  - **Vanilla tag hookups:** a preset replacing `minecraft:stronghold` must add its `replacement_structure` to `data/minecraft/tags/worldgen/structure/eye_of_ender_located.json` (or eyes of ender don't lead to it); same for `minecraft:monument` and `on_ocean_explorer_maps.json`. WARN, not ERROR: the pack still loads, gameplay is just missing the hookup.
+
+  **`check_msl_placements_and_processors`** owns the cross-references that JSON schemas can't express.
+  - **`conditional_concentric_rings`:** `(modid, vanilla_key)` must match a preset in this pack's `replace_vanilla.json` (when `modid == ctx.namespace`) -- otherwise `ReplaceVanillaManager.isEnabled` always returns false and the ring count is stuck on `disabled_count` forever. WARN when `modid` targets another mod's preset (can't verify from this pack). WARN when `enabled_count < disabled_count` (enabled is the "replacing vanilla, full density" case; the inverse is almost always wrong). `structure_id` (if set) must resolve.
+  - **`vanilla_loot_swap_processor`:** the same preset match. FROM keys in `loot_table_mapping` must be used as a `LootTable` on some container in the pack's NBTs (dead FROM key silently does nothing) -- WARN. TO values must be real vanilla loot tables on at least one targeted MC version (via `fetch_registry_set(v, cache, refresh, "loot_table")`) -- ERROR. The containing `processor_list` must be referenced by at least one `template_pool` element's `processors` field -- an unwired swap list never fires -- ERROR.
+  - **`advanced_random_spread`:** `structure_id` (if set) must resolve to a real structure AND be in the owning set's `structures` list (consistency with the owning set).
+
+### Changed
+- Two-tier reporting in the new MSL checks: WARN prints but doesn't fail the check; ERROR fails. Existing check semantics unchanged.
+
+### Tests
+- 46 new tests (`test_worldgen_schemas.py` +15, `test_check_no_enchanted_books.py` +7, `test_check_msl_replace_vanilla.py` +19, `test_check_msl_placements_and_processors.py` +15). Full suite: 157 passed.
+
+### Impact
+`MoogsTemplesReimagined-1.21-datapack`, which ships an MSL 3.1.0 `replace_vanilla.json` with four presets (desert / jungle / monument / stronghold), 3 `vanilla_loot_swap_processor` lists, and a `conditional_concentric_rings` placement:
+
+```
+-  FAIL  check_worldgen_schemas   38 files, 4 error(s)  (unknown MSL types)
++  PASS  check_worldgen_schemas   39 files, 0 errors
++  PASS  check_msl_replace_vanilla             4 preset(s), 4 replacement(s), all valid
++  PASS  check_msl_placements_and_processors   all MSL placement/processor cross-refs OK
+-  24 passed, 1 failed
++  27 passed
+```
+
+Same clean pass on `MoogsTemplesReimagined` (`1.20-datapack`).
+
 ## v1.8.3 -- 2026-07-27
 
 ### Fixed
