@@ -244,6 +244,34 @@
     }
   },
 
+  "moogs_structures:vanilla_loot_swap_processor": {
+    "type": "object",
+    "description": "MSL 3.1.0+. Swaps mod loot table refs on containers back to vanilla loot tables when the matching (modid, vanilla_key) preset is enabled.",
+    "required": ["processor_type", "modid", "vanilla_key", "loot_table_mapping"],
+    "properties": {
+      "processor_type": { "type": "string" },
+      "modid":          { "type": "string" },
+      "vanilla_key":    { "type": "string" },
+      "loot_table_mapping": {
+        "type": "object",
+        "description": "Map of FROM loot table id (used on the replacement's containers) -> TO vanilla loot table id.",
+        "minProperties": 1,
+        "patternProperties": {
+          "^([a-z0-9_.-]+:)?[a-z0-9_./-]+$": {
+            "type": "string",
+            "pattern": "^([a-z0-9_.-]+:)?[a-z0-9_./-]+$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "seed_strategy": {
+        "type": "string",
+        "description": "How the loot roll seed is handled. Any other value silently behaves as preserve.",
+        "enum": ["preserve", "randomize", "clear"]
+      }
+    }
+  },
+
   "moogs_structures:random_replace_with_properties_processor": {
     "type": "object",
     "required": ["processor_type", "input_block", "probability"],

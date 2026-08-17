@@ -279,6 +279,134 @@ def test_vault_processor_missing_loot_table_fails(tmp_path):
     assert not passed
 
 
+# ---------- vanilla_loot_swap_processor (MSL 3.1.0+) ----------
+
+def _swap_proc(**overrides) -> dict:
+    proc = {
+        "processor_type": "moogs_structures:vanilla_loot_swap_processor",
+        "modid": "test",
+        "vanilla_key": "desert_pyramid",
+        "loot_table_mapping": {
+            "test:wall_chest": "minecraft:chests/desert_pyramid",
+        },
+    }
+    proc.update(overrides)
+    return proc
+
+
+def test_vanilla_loot_swap_valid_passes(tmp_path):
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([_swap_proc()]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
+def test_vanilla_loot_swap_valid_with_seed_strategy_passes(tmp_path):
+    _write(tmp_path, "test", "processor_list", "p.json",
+           _processor_list([_swap_proc(seed_strategy="randomize")]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
+def test_vanilla_loot_swap_bad_seed_strategy_fails(tmp_path):
+    _write(tmp_path, "test", "processor_list", "p.json",
+           _processor_list([_swap_proc(seed_strategy="shuffle")]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_vanilla_loot_swap_missing_modid_fails(tmp_path):
+    proc = _swap_proc()
+    del proc["modid"]
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_vanilla_loot_swap_empty_mapping_fails(tmp_path):
+    _write(tmp_path, "test", "processor_list", "p.json",
+           _processor_list([_swap_proc(loot_table_mapping={})]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+# ---------- conditional_concentric_rings (MSL 3.1.0+) ----------
+
+def _rings(**overrides) -> dict:
+    placement = {
+        "type": "moogs_structures:conditional_concentric_rings",
+        "salt": 12345,
+        "distance": 32,
+        "spread": 3,
+        "preferred_biomes": "#minecraft:stronghold_biased_to",
+        "modid": "test",
+        "vanilla_key": "stronghold",
+        "enabled_count": 128,
+        "disabled_count": 26,
+    }
+    placement.update(overrides)
+    return {"structures": [{"structure": "test:s", "weight": 1}], "placement": placement}
+
+
+def test_conditional_rings_valid_passes(tmp_path):
+    _write(tmp_path, "test", "structure_set", "s.json", _rings())
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
+def test_conditional_rings_distance_out_of_range_fails(tmp_path):
+    _write(tmp_path, "test", "structure_set", "s.json", _rings(distance=1024))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_conditional_rings_enabled_count_zero_fails(tmp_path):
+    _write(tmp_path, "test", "structure_set", "s.json", _rings(enabled_count=0))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_conditional_rings_missing_modid_fails(tmp_path):
+    data = _rings()
+    del data["placement"]["modid"]
+    _write(tmp_path, "test", "structure_set", "s.json", data)
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_conditional_rings_biome_list_passes(tmp_path):
+    _write(tmp_path, "test", "structure_set", "s.json",
+           _rings(preferred_biomes=["minecraft:plains", "minecraft:forest"]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
+# ---------- advanced_random_spread 3.1.0 optional fields ----------
+
+def _spread(**overrides) -> dict:
+    placement = {
+        "type": "moogs_structures:advanced_random_spread",
+        "salt": 42,
+        "spacing": 20,
+        "separation": 4,
+    }
+    placement.update(overrides)
+    return {"structures": [{"structure": "test:s", "weight": 1}], "placement": placement}
+
+
+def test_advanced_spread_with_spacing_key_and_structure_id_passes(tmp_path):
+    _write(tmp_path, "test", "structure_set", "s.json",
+           _spread(spacing_key="test:s", structure_id="test:s"))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
+def test_advanced_spread_bad_structure_id_pattern_fails(tmp_path):
+    _write(tmp_path, "test", "structure_set", "s.json",
+           _spread(structure_id="Not A Valid ID"))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
 def test_flood_processor_valid_passes(tmp_path):
     procs = [
         {"processor_type": "moogs_structures:flood_with_water_processor", "flood_level": 62},

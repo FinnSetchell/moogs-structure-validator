@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "moogs_structures:conditional_concentric_rings",
+  "description": "Concentric-rings placement whose ring count is chosen from (enabled_count, disabled_count) based on whether the (modid, vanilla_key) preset is enabled in ReplaceVanillaManager.",
+  "type": "object",
+  "required": [
+    "type",
+    "salt",
+    "distance",
+    "spread",
+    "preferred_biomes",
+    "modid",
+    "vanilla_key",
+    "enabled_count",
+    "disabled_count"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["moogs_structures:conditional_concentric_rings"]
+    },
+
+    "salt": {
+      "type": "integer",
+      "description": "Per-structure RNG salt.",
+      "minimum": 0
+    },
+    "distance": {
+      "type": "integer",
+      "description": "Ring spacing in chunks. Must be in [0, 1023] or datapack load fails.",
+      "minimum": 0,
+      "maximum": 1023
+    },
+    "spread": {
+      "type": "integer",
+      "description": "Angular spread within a ring in chunks. Must be in [0, 1023] or datapack load fails.",
+      "minimum": 0,
+      "maximum": 1023
+    },
+    "preferred_biomes": {
+      "description": "Biome tag string (e.g. #minecraft:stronghold_biased_to) or a list of biome ids.",
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^#?([a-z0-9_.-]+:)?[a-z0-9_./-]+$"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^([a-z0-9_.-]+:)?[a-z0-9_./-]+$"
+          }
+        }
+      ]
+    },
+    "modid": {
+      "type": "string",
+      "description": "Modid used to look up the preset in ReplaceVanillaManager."
+    },
+    "vanilla_key": {
+      "type": "string",
+      "description": "vanilla_key of a Replacement inside a preset owned by modid."
+    },
+    "enabled_count": {
+      "type": "integer",
+      "description": "Ring count used when the preset is enabled. Must be in [1, 4095] or datapack load fails.",
+      "minimum": 1,
+      "maximum": 4095
+    },
+    "disabled_count": {
+      "type": "integer",
+      "description": "Ring count used when the preset is disabled. Must be in [0, 4095] or datapack load fails.",
+      "minimum": 0,
+      "maximum": 4095
+    },
+    "structure_id": {
+      "type": "string",
+      "description": "Optional. If present, must resolve to a real structure in the pack.",
+      "pattern": "^([a-z0-9_.-]+:)?[a-z0-9_./-]+$"
+    },
+
+    "locate_offset": {
+      "description": "Block offset [x, y, z] applied when locating this structure. Each component is clamped to [-16, 16]. Defaults to [0, 0, 0].",
+      "type": "array",
+      "items": { "type": "integer", "minimum": -16, "maximum": 16 },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "frequency_reduction_method": {
+      "type": "string",
+      "enum": ["DEFAULT", "LEGACY_TYPE_1", "LEGACY_TYPE_2", "LEGACY_TYPE_3"]
+    },
+    "frequency": {
+      "type": "number",
+      "description": "Probability (0.0-1.0) that a candidate chunk actually produces a structure.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "exclusion_zone": {
+      "type": "object",
+      "required": ["other_set", "chunk_count"],
+      "properties": {
+        "other_set":   { "type": "string" },
+        "chunk_count": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

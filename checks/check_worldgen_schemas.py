@@ -37,6 +37,7 @@ _MSL_ELEMENT_SCHEMAS: dict[str, str] = {
 }
 _MSL_PLACEMENT_SCHEMAS: dict[str, str] = {
     "moogs_structures:advanced_random_spread": "msl_advanced_random_spread.json",
+    "moogs_structures:conditional_concentric_rings": "msl_conditional_concentric_rings.json",
 }
 
 # MSL's own registries are not stable across Minecraft versions: a handful of types

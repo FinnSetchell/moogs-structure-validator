@@ -95,6 +95,16 @@
       "type": "integer",
       "description": "Minimum block distance from world origin (0, 0) before this structure may spawn.",
       "minimum": 0
+    },
+
+    "spacing_key": {
+      "type": "string",
+      "description": "Optional (MSL 3.1.0+). Runtime-derivable from the owning set id; only set it to override the derived value."
+    },
+    "structure_id": {
+      "type": "string",
+      "description": "Optional (MSL 3.1.0+). Runtime-derivable from the owning set; only set it to override the derived value. Must point at a real structure in the pack.",
+      "pattern": "^([a-z0-9_.-]+:)?[a-z0-9_./-]+$"
     }
   }
 }
