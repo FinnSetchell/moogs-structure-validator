@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import nbtlib
-from nbtlib import Compound, Double, Int, List, String
+from nbtlib import Byte, Compound, Double, Int, List, String
 
 from tests.nbt_helpers import (
     FakeContext,
@@ -337,6 +337,127 @@ def test_bad_attribute_id_still_fails_alongside_a_modifier(tmp_path, monkeypatch
     passed, summary = mod.run(ctx)
     assert not passed
     assert "1 attribute id error" in summary
+
+
+# ---------- check_attribute_ids: item-sourced modifiers (1.20.5 boundary) ----------
+
+_ATTR = "generic.attack_damage"
+
+
+def _legacy_modifier_sword() -> Compound:
+    """An item stack as 1.20.4 writes it: modifiers under `tag.AttributeModifiers`."""
+    return Compound({
+        "id": String("minecraft:iron_sword"),
+        "Count": Byte(1),
+        "tag": Compound({
+            "AttributeModifiers": List[Compound]([
+                Compound({
+                    "AttributeName": String(_ATTR),
+                    "Name": String(_ATTR),
+                    "Amount": Double(3.0),
+                    "Operation": Int(0),
+                }),
+            ]),
+        }),
+    })
+
+
+def _component_modifier_sword() -> Compound:
+    """The same stack as 1.20.5 writes it: modifiers under `components`."""
+    return Compound({
+        "id": String("minecraft:iron_sword"),
+        "count": Int(1),
+        "components": Compound({
+            "minecraft:attribute_modifiers": Compound({
+                "modifiers": List[Compound]([
+                    Compound({
+                        "type": String(f"minecraft:{_ATTR}"),
+                        "amount": Double(3.0),
+                        "operation": String("add_value"),
+                        "slot": String("mainhand"),
+                    }),
+                ]),
+            }),
+        }),
+    })
+
+
+def _frame_pack(tmp_path, monkeypatch, item: Compound, range_key: str,
+                mc_versions: list[str], data_version: int) -> Path:
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, entities={"minecraft:item_frame"},
+                    items={"minecraft:iron_sword"},
+                    attributes={f"minecraft:{_ATTR}"})
+    frame = Compound({"id": String("minecraft:item_frame"), "Item": item})
+    nbt = structure_nbt(data_version, entities=[entity_entry(frame)])
+    save(nbt, structures / "f.nbt")
+    _wire(pools / "p.json", "test:f", {range_key: "test:f"})
+    return root
+
+
+def test_item_modifiers_in_components_on_1_20_5_target_passes(tmp_path, monkeypatch):
+    """Regression: item modifiers were judged against the 1.21 entity-attribute
+    boundary, so a correct 1.20.5 stack was reported as a shape error."""
+    root = _frame_pack(tmp_path, monkeypatch, _component_modifier_sword(),
+                       "1.20.5-1.20.6", ["1.20.5", "1.20.6"], 3839)
+
+    from checks import check_attribute_ids as mod
+    ctx = FakeContext("test", ["1.20.5", "1.20.6"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_item_modifiers_in_tag_on_1_20_4_target_passes(tmp_path, monkeypatch):
+    root = _frame_pack(tmp_path, monkeypatch, _legacy_modifier_sword(),
+                       "1.20-1.20.4", ["1.20", "1.20.4"], 3700)
+
+    from checks import check_attribute_ids as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_item_modifiers_in_tag_on_1_20_5_target_fails(tmp_path, monkeypatch):
+    root = _frame_pack(tmp_path, monkeypatch, _legacy_modifier_sword(),
+                       "1.20.5-1.20.6", ["1.20.5", "1.20.6"], 3839)
+
+    from checks import check_attribute_ids as mod
+    ctx = FakeContext("test", ["1.20.5", "1.20.6"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_item_modifiers_in_components_on_1_20_4_target_fails(tmp_path, monkeypatch):
+    root = _frame_pack(tmp_path, monkeypatch, _component_modifier_sword(),
+                       "1.20-1.20.4", ["1.20", "1.20.4"], 3700)
+
+    from checks import check_attribute_ids as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_entity_attributes_still_use_the_1_21_boundary(tmp_path, monkeypatch):
+    """Guard against over-correction: moving item modifiers to 1.20.5 must not
+    drag the entity attribute list down with them."""
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, entities={"minecraft:zombie"},
+                    attributes={f"minecraft:{_ATTR}"})
+
+    zombie = Compound({
+        "id": String("minecraft:zombie"),
+        "attributes": List[Compound]([
+            Compound({"id": String(f"minecraft:{_ATTR}"), "base": Double(3.0)}),
+        ]),
+    })
+    nbt = structure_nbt(3839, entities=[entity_entry(zombie)])
+    save(nbt, structures / "z.nbt")
+    _wire(pools / "p.json", "test:z", {"1.20.5-1.20.6": "test:z"})
+
+    from checks import check_attribute_ids as mod
+    ctx = FakeContext("test", ["1.20.5", "1.20.6"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
 
 
 # ---------- check_potion_effects ----------
