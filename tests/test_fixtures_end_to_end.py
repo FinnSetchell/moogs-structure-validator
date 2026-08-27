@@ -638,52 +638,32 @@ def test_particle_field_on_another_entity_is_not_flagged(tmp_path, monkeypatch):
 
 # ---------- check_block_entity_components ----------
 
-def _block_entity_pack(tmp_path, monkeypatch, block_id: str, block_nbt: Compound,
+def _block_entity_pack(tmp_path, monkeypatch, entries: list[tuple[str, Compound]],
                        range_key: str, data_version: int) -> Path:
     root, structures, pools = build_datapack(tmp_path)
-    stub_registries(monkeypatch, blocks={block_id})
+    stub_registries(monkeypatch, blocks={bid for bid, _ in entries})
     nbt = structure_nbt(
         data_version,
-        palette=[Compound({"Name": String(block_id)})],
-        blocks=[block_entry(0, nbt=block_nbt)],
+        palette=[Compound({"Name": String(bid)}) for bid, _ in entries],
+        blocks=[block_entry(i, pos=(i, 0, 0), nbt=be) for i, (_, be) in enumerate(entries)],
     )
     save(nbt, structures / "c.nbt")
     _wire(pools / "p.json", "test:c", {range_key: "test:c"})
     return root
 
 
-def _chest(with_components: bool) -> Compound:
-    chest = Compound({"id": String("minecraft:chest")})
+def _container(block_id: str, with_components: bool) -> tuple[str, Compound]:
+    be = Compound({"id": String(block_id)})
     if with_components:
-        chest["components"] = Compound({})
-    return chest
+        be["components"] = Compound({})
+    return block_id, be
 
 
-def test_chest_without_components_on_1_21_target_fails(tmp_path, monkeypatch):
-    """The components-key rule is not sign-specific: every block entity gained one
-    at 1.20.5, so a chest missing it on a 1.21-floored file is wrong too."""
-    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:chest",
-                              _chest(with_components=False), "1.21-1.21.1", 3955)
-
-    from checks import check_block_entity_components as mod
-    ctx = FakeContext("test", ["1.21", "1.21.1"], root)
-    passed, _ = mod.run(ctx)
-    assert not passed
-
-
-def test_chest_with_components_on_1_21_target_passes(tmp_path, monkeypatch):
-    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:chest",
-                              _chest(with_components=True), "1.21-1.21.1", 3955)
-
-    from checks import check_block_entity_components as mod
-    ctx = FakeContext("test", ["1.21", "1.21.1"], root)
-    passed, summary = mod.run(ctx)
-    assert passed, summary
-
-
-def test_chest_with_components_on_1_20_4_target_fails(tmp_path, monkeypatch):
-    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:chest",
-                              _chest(with_components=True), "1.20-1.20.4", 3700)
+def test_components_key_below_1_20_5_fails(tmp_path, monkeypatch):
+    """The rule that holds in both directions: the key does not exist before 1.20.5,
+    so a file floored below it must not carry one on any block entity."""
+    root = _block_entity_pack(tmp_path, monkeypatch,
+                              [_container("minecraft:chest", True)], "1.20-1.20.4", 3700)
 
     from checks import check_block_entity_components as mod
     ctx = FakeContext("test", ["1.20", "1.20.4"], root)
@@ -691,9 +671,9 @@ def test_chest_with_components_on_1_20_4_target_fails(tmp_path, monkeypatch):
     assert not passed
 
 
-def test_chest_without_components_on_1_20_4_target_passes(tmp_path, monkeypatch):
-    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:chest",
-                              _chest(with_components=False), "1.20-1.20.4", 3700)
+def test_no_components_key_below_1_20_5_passes(tmp_path, monkeypatch):
+    root = _block_entity_pack(tmp_path, monkeypatch,
+                              [_container("minecraft:chest", False)], "1.20-1.20.4", 3700)
 
     from checks import check_block_entity_components as mod
     ctx = FakeContext("test", ["1.20", "1.20.4"], root)
@@ -701,7 +681,50 @@ def test_chest_without_components_on_1_20_4_target_passes(tmp_path, monkeypatch)
     assert passed, summary
 
 
-def _json_sign(with_components: bool) -> Compound:
+def test_file_uniformly_without_components_above_1_20_5_passes_quietly(tmp_path, monkeypatch):
+    """Whole-file absence above 1.20.5 tracks how the file was written, not an
+    authoring bug -- 145 files across the portfolio look like this. Not reportable."""
+    root = _block_entity_pack(tmp_path, monkeypatch, [
+        _container("minecraft:chest", False),
+        _container("minecraft:barrel", False),
+    ], "1.21-1.21.1", 3955)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.21", "1.21.1"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+    assert "0 warning(s)" in summary
+
+
+def test_file_uniformly_with_components_above_1_20_5_passes_quietly(tmp_path, monkeypatch):
+    root = _block_entity_pack(tmp_path, monkeypatch, [
+        _container("minecraft:chest", True),
+        _container("minecraft:barrel", True),
+    ], "1.21-1.21.1", 3955)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.21", "1.21.1"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+    assert "0 warning(s)" in summary
+
+
+def test_file_disagreeing_with_itself_above_1_20_5_warns(tmp_path, monkeypatch):
+    """A non-sign block entity missing the key while its neighbours carry it is the
+    odd one out -- reported, but as a WARN, so it does not fail the check."""
+    root = _block_entity_pack(tmp_path, monkeypatch, [
+        _container("minecraft:chest", True),
+        _container("minecraft:barrel", False),
+    ], "1.21-1.21.1", 3955)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.21", "1.21.1"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+    assert "1 warning(s)" in summary
+
+
+def _json_sign(with_components: bool) -> tuple[str, Compound]:
     """A pre-1.20.5 sign: JSON-encoded messages, optionally carrying the 1.20.5+ key."""
     sign = Compound({
         "id": String("minecraft:oak_sign"),
@@ -711,12 +734,12 @@ def _json_sign(with_components: bool) -> Compound:
     })
     if with_components:
         sign["components"] = Compound({})
-    return sign
+    return "minecraft:oak_sign", sign
 
 
 def test_sign_components_key_now_reported_by_the_general_check(tmp_path, monkeypatch):
-    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:oak_sign",
-                              _json_sign(with_components=True), "1.20-1.20.4", 3700)
+    root = _block_entity_pack(tmp_path, monkeypatch,
+                              [_json_sign(with_components=True)], "1.20-1.20.4", 3700)
 
     from checks import check_block_entity_components as mod
     ctx = FakeContext("test", ["1.20", "1.20.4"], root)
@@ -724,10 +747,24 @@ def test_sign_components_key_now_reported_by_the_general_check(tmp_path, monkeyp
     assert not passed
 
 
+def test_non_sign_block_entity_components_key_is_reported_too(tmp_path, monkeypatch):
+    """The gap this closes: before, only signs were considered at all."""
+    root = _block_entity_pack(tmp_path, monkeypatch,
+                              [_container("minecraft:barrel", True)], "1.20-1.20.4", 3700)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+    from checks import check_sign_nbt as sign_mod
+    assert sign_mod.run(FakeContext("test", ["1.20", "1.20.4"], root))[0]
+
+
 def test_sign_check_keeps_text_rules_and_drops_the_components_rule(tmp_path, monkeypatch):
     """check_sign_nbt no longer owns the components key; its text rules are untouched."""
-    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:oak_sign",
-                              _json_sign(with_components=True), "1.20-1.20.4", 3700)
+    root = _block_entity_pack(tmp_path, monkeypatch,
+                              [_json_sign(with_components=True)], "1.20-1.20.4", 3700)
 
     from checks import check_sign_nbt as mod
     ctx = FakeContext("test", ["1.20", "1.20.4"], root)
@@ -736,10 +773,9 @@ def test_sign_check_keeps_text_rules_and_drops_the_components_rule(tmp_path, mon
 
 
 def test_sign_bare_message_on_pre_1_20_5_target_still_fails(tmp_path, monkeypatch):
-    sign = _json_sign(with_components=False)
+    block_id, sign = _json_sign(with_components=False)
     sign["front_text"] = Compound({"messages": List[String]([String("")] * 4)})
-    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:oak_sign",
-                              sign, "1.20-1.20.4", 3700)
+    root = _block_entity_pack(tmp_path, monkeypatch, [(block_id, sign)], "1.20-1.20.4", 3700)
 
     from checks import check_sign_nbt as mod
     ctx = FakeContext("test", ["1.20", "1.20.4"], root)
