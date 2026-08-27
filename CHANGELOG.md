@@ -1,5 +1,40 @@
 # changelog
 
+## v1.10.0 -- 2026-08-27
+
+### Fixed
+- **`check_registries` skipped the NBT palette scan entirely on any project without a `loot_table` directory.** The check opened with an early `return True, "skipped (no loot tables)"` and the palette scan sat below it, so a pack shipping structures but no loot tables reported PASS having looked at nothing. The two halves are independent and now run that way: a missing `loot_table` directory skips only the loot-table half, and the check returns early only when neither a loot table nor a structure directory exists.
+
+  The palette is still validated at each file's **minimum** covered version only, and the reason is now written down in the source. On load the game runs a structure through DataFixerUpper keyed on the file's own `DataVersion`, so a block renamed in a later version (`chain` -> `iron_chain`, `grass` -> `short_grass`) is re-mapped upward automatically. A palette valid at the floor is valid at every version above it -- checking every covered version would only invent errors.
+
+- **`check_attribute_ids` judged item attribute modifiers against the 1.21 entity-attribute boundary.** An item stack's attribute modifiers are a different thing from an entity's attribute list and did not move with them. Entity `Attributes` became `attributes` at 1.21 (DV 3953); an item's modifiers travelled with the rest of item NBT a full release earlier, at 1.20.5 (DV 3837), when `tag` became `components`. `_flag()` applied DV 3953 to both, which produced errors in both directions on 1.20.5/1.20.6 targets: a correct `components` -> `minecraft:attribute_modifiers` stack was reported as a shape error, and a stale `tag.AttributeModifiers` on the same file went unreported.
+
+  The origin ("entity" or "item") is now threaded through to `_flag()` and selects the boundary from a small table. The 1.21.2 prefix boundary (`generic.max_health` -> `max_health`) is unchanged and still applies to both, as it always did.
+
+### Added
+- **`check_block_entity_components`** -- the `components` key on a block entity arrived at 1.20.5 and is never written before it, so a file whose minimum target is below 1.20.5 must not carry one on any block entity. That rule already existed inside `check_sign_nbt`, applied to signs only; a chest or barrel carrying the key on a pre-1.20.5 file went unreported. It now covers every block entity. ERROR.
+
+  The inverse is deliberately **not** enforced, because the data does not support it. Surveying MSS + MVS + MTR: above 1.20.5, 223 files carry the key on every block entity and 145 carry it on none, with the same block entity types (`chest`, `barrel`, `bed`, `jigsaw`, `sign`) and the same `DataVersion` appearing on both sides. Whole-file absence tracks how a file was written -- saved in-game vs produced by the downgrade pipeline -- not an authoring mistake, and the game supplies an empty component map when the key is missing. Requiring it failed 60 of 99 files on MSS alone.
+
+  What *is* reported is a file that disagrees with itself: some block entities carrying the key, others not. Across the three mods that is 21 files, every one of them a handful of containers among a hundred-plus consistent block entities -- the signature of a container rewritten by tooling after the save. WARN, so it prints without failing the check.
+
+- **`check_no_particles`** -- policy check: builds ship no particle-emitting entities. Flags any `minecraft:area_effect_cloud` carrying a particle field, walking riders and spawner-nested entities via `iter_entities`. The field was renamed at 1.21.6, so `Particle` and `custom_particle` are treated identically; this is a policy rule rather than a version-format one and neither spelling is wanted on any version.
+
+### Changed
+- `check_sign_nbt` no longer reports the `components` key. It keeps the sign-only text-format rules (`front_text` / `back_text` messages are JSON-encoded text components before 1.20.5, bare strings after), which really are sign-specific. The components key moved to `check_block_entity_components`.
+- `tests/nbt_helpers.stub_registries` also patches `registries.version_probe._fetch_version`, which binds the name at import time and so was left reaching the network when a check annotated an unknown block ID.
+
+### Tests
+- 21 new fixture tests. Full suite: 178 passed.
+
+### Impact
+`MoogsSoaringStructures`, `MoogsVoyagerStructures-1.21-datapack` and `MoogsTemplesReimagined-1.21-datapack` all pass both new checks. MVS reports the 21 self-inconsistent files as warnings:
+
+```
++  PASS  check_block_entity_components   256 files, 2960 block entities, 21 warning(s)
++  PASS  check_no_particles              256 files, no particle-emitting entities
+```
+
 ## v1.9.0 -- 2026-08-17
 
 ### Added

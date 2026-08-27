@@ -78,7 +78,15 @@ The check name (first element of the tuple) is what users pass to `--check` and 
 
 ## Testing your check
 
-The project has no automated test suite. Test manually:
+There is a pytest suite under `tests/`. Run it with:
+
+```bash
+py -3.13 -m pytest -q
+```
+
+Most checks are covered by fixture tests in `tests/test_fixtures_end_to_end.py`: each builds a mini datapack in a tmp dir, writes real `.nbt` and pool JSON, monkeypatches the network-backed registry helpers via `tests/nbt_helpers.stub_registries`, and asserts on the `(passed, summary)` tuple your `run` returns. Add yours there.
+
+Then test against a real project:
 
 ```bash
 # Run just your check against a real mod project
