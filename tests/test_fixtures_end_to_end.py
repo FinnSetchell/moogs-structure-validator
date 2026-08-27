@@ -572,6 +572,117 @@ def test_wolf_variant_spanning_1_20_5_fails(tmp_path, monkeypatch):
     assert not passed
 
 
+# ---------- check_block_entity_components ----------
+
+def _block_entity_pack(tmp_path, monkeypatch, block_id: str, block_nbt: Compound,
+                       range_key: str, data_version: int) -> Path:
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, blocks={block_id})
+    nbt = structure_nbt(
+        data_version,
+        palette=[Compound({"Name": String(block_id)})],
+        blocks=[block_entry(0, nbt=block_nbt)],
+    )
+    save(nbt, structures / "c.nbt")
+    _wire(pools / "p.json", "test:c", {range_key: "test:c"})
+    return root
+
+
+def _chest(with_components: bool) -> Compound:
+    chest = Compound({"id": String("minecraft:chest")})
+    if with_components:
+        chest["components"] = Compound({})
+    return chest
+
+
+def test_chest_without_components_on_1_21_target_fails(tmp_path, monkeypatch):
+    """The components-key rule is not sign-specific: every block entity gained one
+    at 1.20.5, so a chest missing it on a 1.21-floored file is wrong too."""
+    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:chest",
+                              _chest(with_components=False), "1.21-1.21.1", 3955)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.21", "1.21.1"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_chest_with_components_on_1_21_target_passes(tmp_path, monkeypatch):
+    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:chest",
+                              _chest(with_components=True), "1.21-1.21.1", 3955)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.21", "1.21.1"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_chest_with_components_on_1_20_4_target_fails(tmp_path, monkeypatch):
+    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:chest",
+                              _chest(with_components=True), "1.20-1.20.4", 3700)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_chest_without_components_on_1_20_4_target_passes(tmp_path, monkeypatch):
+    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:chest",
+                              _chest(with_components=False), "1.20-1.20.4", 3700)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def _json_sign(with_components: bool) -> Compound:
+    """A pre-1.20.5 sign: JSON-encoded messages, optionally carrying the 1.20.5+ key."""
+    sign = Compound({
+        "id": String("minecraft:oak_sign"),
+        "front_text": Compound({
+            "messages": List[String]([String('{"text":"hi"}')] * 4),
+        }),
+    })
+    if with_components:
+        sign["components"] = Compound({})
+    return sign
+
+
+def test_sign_components_key_now_reported_by_the_general_check(tmp_path, monkeypatch):
+    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:oak_sign",
+                              _json_sign(with_components=True), "1.20-1.20.4", 3700)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_sign_check_keeps_text_rules_and_drops_the_components_rule(tmp_path, monkeypatch):
+    """check_sign_nbt no longer owns the components key; its text rules are untouched."""
+    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:oak_sign",
+                              _json_sign(with_components=True), "1.20-1.20.4", 3700)
+
+    from checks import check_sign_nbt as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_sign_bare_message_on_pre_1_20_5_target_still_fails(tmp_path, monkeypatch):
+    sign = _json_sign(with_components=False)
+    sign["front_text"] = Compound({"messages": List[String]([String("")] * 4)})
+    root = _block_entity_pack(tmp_path, monkeypatch, "minecraft:oak_sign",
+                              sign, "1.20-1.20.4", 3700)
+
+    from checks import check_sign_nbt as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
 # ---------- check_registries ----------
 
 def _palette_pack(tmp_path, block_ids: list[str]) -> Path:

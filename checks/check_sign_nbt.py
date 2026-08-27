@@ -92,13 +92,9 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
             sign_bad = False
 
-            if "components" in block_nbt:
-                errors.append(
-                    f"[ERROR] {rel}: sign has 'components' key"
-                    f" (new sign format, incompatible with min target {file_min_version})"
-                )
-                sign_bad = True
-
+            # The `components` key is not a sign thing -- every block entity gained
+            # one at 1.20.5. check_block_entity_components owns that rule for all of
+            # them; what is left here is the sign-only text format.
             for face in ("front_text", "back_text"):
                 face_compound = block_nbt.get(face)
                 if not isinstance(face_compound, nbtlib.Compound):

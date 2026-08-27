@@ -77,6 +77,7 @@ def _check_modules():
     import checks.check_worldgen_schemas as check_worldgen_schemas
     import checks.check_entity_nbt as check_entity_nbt
     import checks.check_sign_nbt as check_sign_nbt
+    import checks.check_block_entity_components as check_block_entity_components
     import checks.check_biome_tags as check_biome_tags
     import checks.check_containers as check_containers
     import checks.check_jigsaw_pools as check_jigsaw_pools
@@ -107,6 +108,7 @@ def _check_modules():
         ("check_worldgen_schemas", check_worldgen_schemas),
         ("check_entity_nbt", check_entity_nbt),
         ("check_sign_nbt", check_sign_nbt),
+        ("check_block_entity_components", check_block_entity_components),
         ("check_text_components", check_text_components),
         ("check_biome_tags", check_biome_tags),
         ("check_containers", check_containers),
