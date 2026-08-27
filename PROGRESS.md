@@ -1,7 +1,7 @@
 ## v1.10.0 additions (2026-08-27)
 - [x] `checks/check_registries.py` -- palette scan no longer sits behind the loot-table early return; the two halves run independently, and the DFU min-version reasoning is stated in the source
 - [x] `checks/check_attribute_ids.py` -- `_ShapeBoundary` table: item attribute modifiers use the 1.20.5 boundary, entity attributes keep 1.21; the 1.21.2 prefix boundary is unchanged for both
-- [x] `checks/check_block_entity_components.py` -- pre-1.20.5 `components` key on any block entity is an ERROR (generalises the sign-only rule); self-inconsistent files above 1.20.5 are a WARN. The "must have it above 1.20.5" direction is not enforced -- surveyed MSS/MVS/MTR and it is a per-file, not per-block-entity, property
+- [x] `checks/check_block_entity_components.py` -- symmetric on the file's min covered version: below 1.20.5 no block entity may carry `components`, at or above it every block entity must. Generalises the sign-only rule to all block entities. Stale converter output fails by design; the failure list is the reconversion queue (MSS 60/99, MVS 101/256 at time of writing)
 - [x] `checks/check_no_particles.py` -- policy: no `minecraft:area_effect_cloud` carrying `Particle` (pre-1.21.6) or `custom_particle` (1.21.6+)
 - [x] `checks/check_sign_nbt.py` -- components-key rule removed; sign text rules kept
 - [x] `tests/nbt_helpers.py` -- `stub_registries` also patches `registries.version_probe._fetch_version`

@@ -660,8 +660,8 @@ def _container(block_id: str, with_components: bool) -> tuple[str, Compound]:
 
 
 def test_components_key_below_1_20_5_fails(tmp_path, monkeypatch):
-    """The rule that holds in both directions: the key does not exist before 1.20.5,
-    so a file floored below it must not carry one on any block entity."""
+    """The key does not exist before 1.20.5, so a file floored below it must not
+    carry one on any block entity."""
     root = _block_entity_pack(tmp_path, monkeypatch,
                               [_container("minecraft:chest", True)], "1.20-1.20.4", 3700)
 
@@ -681,9 +681,21 @@ def test_no_components_key_below_1_20_5_passes(tmp_path, monkeypatch):
     assert passed, summary
 
 
-def test_file_uniformly_without_components_above_1_20_5_passes_quietly(tmp_path, monkeypatch):
-    """Whole-file absence above 1.20.5 tracks how the file was written, not an
-    authoring bug -- 145 files across the portfolio look like this. Not reportable."""
+def test_chest_missing_components_above_1_20_5_fails(tmp_path, monkeypatch):
+    """The other half of the same rule: from 1.20.5 the game writes the key on every
+    block entity, so a chest without one is a file that still needs reconverting."""
+    root = _block_entity_pack(tmp_path, monkeypatch,
+                              [_container("minecraft:chest", False)], "1.21-1.21.1", 3955)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.21", "1.21.1"], root)
+    passed, summary = mod.run(ctx)
+    assert not passed
+    assert "reconversion" in summary
+
+
+def test_whole_file_missing_components_above_1_20_5_fails(tmp_path, monkeypatch):
+    """Whole-file absence is stale converter output, not a reason to stay quiet."""
     root = _block_entity_pack(tmp_path, monkeypatch, [
         _container("minecraft:chest", False),
         _container("minecraft:barrel", False),
@@ -691,12 +703,11 @@ def test_file_uniformly_without_components_above_1_20_5_passes_quietly(tmp_path,
 
     from checks import check_block_entity_components as mod
     ctx = FakeContext("test", ["1.21", "1.21.1"], root)
-    passed, summary = mod.run(ctx)
-    assert passed, summary
-    assert "0 warning(s)" in summary
+    passed, _ = mod.run(ctx)
+    assert not passed
 
 
-def test_file_uniformly_with_components_above_1_20_5_passes_quietly(tmp_path, monkeypatch):
+def test_file_with_components_throughout_above_1_20_5_passes(tmp_path, monkeypatch):
     root = _block_entity_pack(tmp_path, monkeypatch, [
         _container("minecraft:chest", True),
         _container("minecraft:barrel", True),
@@ -706,12 +717,9 @@ def test_file_uniformly_with_components_above_1_20_5_passes_quietly(tmp_path, mo
     ctx = FakeContext("test", ["1.21", "1.21.1"], root)
     passed, summary = mod.run(ctx)
     assert passed, summary
-    assert "0 warning(s)" in summary
 
 
-def test_file_disagreeing_with_itself_above_1_20_5_warns(tmp_path, monkeypatch):
-    """A non-sign block entity missing the key while its neighbours carry it is the
-    odd one out -- reported, but as a WARN, so it does not fail the check."""
+def test_one_block_entity_missing_components_fails_the_whole_file(tmp_path, monkeypatch):
     root = _block_entity_pack(tmp_path, monkeypatch, [
         _container("minecraft:chest", True),
         _container("minecraft:barrel", False),
@@ -719,9 +727,22 @@ def test_file_disagreeing_with_itself_above_1_20_5_warns(tmp_path, monkeypatch):
 
     from checks import check_block_entity_components as mod
     ctx = FakeContext("test", ["1.21", "1.21.1"], root)
-    passed, summary = mod.run(ctx)
-    assert passed, summary
-    assert "1 warning(s)" in summary
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_beds_get_no_exception(tmp_path, monkeypatch):
+    """Injected bed block entities are a known converter-side gap. It is fixed in the
+    converter, not here -- an exception would hide the files still needing the pass."""
+    root = _block_entity_pack(tmp_path, monkeypatch, [
+        _container("minecraft:chest", True),
+        _container("minecraft:red_bed", False),
+    ], "1.21-1.21.1", 3955)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.21", "1.21.1"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
 
 
 def _json_sign(with_components: bool) -> tuple[str, Compound]:

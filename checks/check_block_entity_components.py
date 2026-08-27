@@ -1,23 +1,21 @@
-"""Where a block entity's `components` key may and may not appear.
+"""A block entity's `components` key must match the era the file targets.
 
-The key arrived at 1.20.5, alongside the item-format change. It is never written
-before that: across every pre-1.20.5 structure in the portfolio, not one block
-entity carries one. So a file whose minimum target is below 1.20.5 must not have
-it on any block entity -- that is a hard error, and it is the rule
-`check_sign_nbt` used to enforce for signs alone.
+The key arrived at 1.20.5. Our per-version variants are produced by each era's
+own game writer, so the rule is symmetric and both halves are hard errors, keyed
+on the file's minimum covered version like every other boundary check here:
 
-The inverse is deliberately NOT enforced. Above 1.20.5 the key turns out to be a
-per-file property, not a per-block-entity one. Surveying MSS + MVS + MTR, 223
-files carry it on every block entity and 145 carry it on none, with the same
-block entity types and the same DataVersion appearing on both sides -- whole-file
-absence tracks how a file was written (saved in-game vs produced by the downgrade
-pipeline), not an authoring mistake, and the game supplies an empty component map
-when the key is absent. Failing on it would flag most of the portfolio.
+  - minimum below 1.20.5 -- no block entity may carry the key;
+  - minimum at or above 1.20.5 -- every block entity must carry it.
 
-What is worth reporting is a file that disagrees with itself. If some block
-entities in a file carry the key and others don't, the ones missing it are the
-odd ones out -- usually a container rewritten by tooling after the save. That is
-a WARN: it prints, but it does not fail the check.
+Files written by older tooling do not satisfy the second half, and they are meant
+to fail. The converter now guarantees both directions, so a failure here names a
+project that still needs re-running -- producing that list is the point of the
+check. Do not soften it, and do not add per-block exceptions for known converter
+gaps: reconverted output will comply, and an exception would hide the files that
+still need the pass.
+
+`check_sign_nbt` used to enforce the first half for signs alone. It now owns only
+the sign text format, which really is sign-specific.
 """
 from __future__ import annotations
 
@@ -92,7 +90,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         )
 
     errors: list[str] = []
-    warnings: list[str] = []
+    files_with_errors: set[Path] = set()
     files_checked = 0
     block_entities_checked = 0
 
@@ -108,53 +106,49 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         rel = str(nbt_path.relative_to(structures_dir))
 
         # Gate on the mod's wired target range, not nbt["DataVersion"]. Structures
-        # are typically saved on the newest release and downgraded per-version, so
+        # are typically saved on the newest release and converted per-version, so
         # the source DataVersion does not describe what the file actually contains.
         file_min_version = nbt_min_versions.get(nbt_path, global_min_version)
         file_min_dv = version_map.get(file_min_version)
         if file_min_dv is None:
             continue
+        expects_components = file_min_dv >= DV_1_20_5
 
         files_checked += 1
         names = _palette_names(nbt)
-        with_key: list[str] = []
-        without_key: list[str] = []
+        offenders: list[str] = []
 
         for block_entry in nbt.get("blocks") or []:
             block_nbt = block_entry.get("nbt")
             if not isinstance(block_nbt, nbtlib.Compound):
                 continue
             block_entities_checked += 1
-            target = with_key if "components" in block_nbt else without_key
-            target.append(_block_id(names, block_entry))
+            if ("components" in block_nbt) != expects_components:
+                offenders.append(_block_id(names, block_entry))
 
-        if file_min_dv < DV_1_20_5:
-            if with_key:
-                errors.append(
-                    f"[ERROR] {rel}: {len(with_key)} {_noun(len(with_key))} with a"
-                    f" `components` key (1.20.5+ format, incompatible with min target"
-                    f" {file_min_version}): {_listed(with_key)}"
-                )
+        if not offenders:
             continue
 
-        # At or above 1.20.5, only a file that disagrees with itself is reportable.
-        if with_key and without_key:
-            verb = "has" if len(with_key) == 1 else "have"
-            warnings.append(
-                f"[WARN] {rel}: {len(without_key)} {_noun(len(without_key))} without a"
-                f" `components` key while {len(with_key)} in the same file {verb} one:"
-                f" {_listed(without_key)}"
-            )
+        if expects_components:
+            detail = (f"without a `components` key (required from 1.20.5;"
+                      f" min target {file_min_version})")
+        else:
+            detail = (f"with a `components` key (1.20.5+ format, incompatible with"
+                      f" min target {file_min_version})")
+        errors.append(
+            f"[ERROR] {rel}: {len(offenders)} {_noun(len(offenders))} {detail}:"
+            f" {_listed(offenders)}"
+        )
+        files_with_errors.add(nbt_path)
 
     for msg in errors:
         print(f"  {msg}")
-    for msg in warnings:
-        print(f"  {msg}")
-
-    if not errors and not warnings:
-        print(f"  {files_checked} file(s), {block_entities_checked} block entities"
-              f" checked -- all consistent")
 
     if errors:
-        return False, f"{len(errors)} error(s), {len(warnings)} warning(s)"
-    return True, f"{files_checked} files, {block_entities_checked} block entities, {len(warnings)} warning(s)"
+        return False, (
+            f"{len(files_with_errors)} of {files_checked} file(s) need reconversion"
+        )
+
+    print(f"  {files_checked} file(s), {block_entities_checked} block entities"
+          f" checked -- all valid")
+    return True, f"{files_checked} files, {block_entities_checked} block entities checked"

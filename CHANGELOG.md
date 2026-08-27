@@ -12,11 +12,14 @@
   The origin ("entity" or "item") is now threaded through to `_flag()` and selects the boundary from a small table. The 1.21.2 prefix boundary (`generic.max_health` -> `max_health`) is unchanged and still applies to both, as it always did.
 
 ### Added
-- **`check_block_entity_components`** -- the `components` key on a block entity arrived at 1.20.5 and is never written before it, so a file whose minimum target is below 1.20.5 must not carry one on any block entity. That rule already existed inside `check_sign_nbt`, applied to signs only; a chest or barrel carrying the key on a pre-1.20.5 file went unreported. It now covers every block entity. ERROR.
+- **`check_block_entity_components`** -- the `components` key on a block entity arrived at 1.20.5, and each per-version variant is emitted by that era's own game writer, so the rule is symmetric and both halves are errors, keyed on the file's minimum covered version:
 
-  The inverse is deliberately **not** enforced, because the data does not support it. Surveying MSS + MVS + MTR: above 1.20.5, 223 files carry the key on every block entity and 145 carry it on none, with the same block entity types (`chest`, `barrel`, `bed`, `jigsaw`, `sign`) and the same `DataVersion` appearing on both sides. Whole-file absence tracks how a file was written -- saved in-game vs produced by the downgrade pipeline -- not an authoring mistake, and the game supplies an empty component map when the key is missing. Requiring it failed 60 of 99 files on MSS alone.
+  - minimum below 1.20.5 -- no block entity may carry the key;
+  - minimum at or above 1.20.5 -- every block entity must carry it.
 
-  What *is* reported is a file that disagrees with itself: some block entities carrying the key, others not. Across the three mods that is 21 files, every one of them a handful of containers among a hundred-plus consistent block entities -- the signature of a container rewritten by tooling after the save. WARN, so it prints without failing the check.
+  The first half already existed inside `check_sign_nbt`, applied to signs only, so a chest or barrel carrying the key on a pre-1.20.5 file went unreported. The second half was not checked at all.
+
+  Files written by older tooling fail the second half, and that is the intended result rather than a false positive: the converter now guarantees both directions, so the failure list names the projects that still need re-running. On the current portfolio that is 60 of 99 files on MSS. **Do not soften the check or add per-block exceptions to quiet it** -- including for the known converter-side gap on injected bed block entities, which is being fixed in the converter. An exception would hide exactly the files the check exists to find.
 
 - **`check_no_particles`** -- policy check: builds ship no particle-emitting entities. Flags any `minecraft:area_effect_cloud` carrying a particle field, walking riders and spawner-nested entities via `iter_entities`. The field was renamed at 1.21.6, so `Particle` and `custom_particle` are treated identically; this is a policy rule rather than a version-format one and neither spelling is wanted on any version.
 
@@ -25,15 +28,20 @@
 - `tests/nbt_helpers.stub_registries` also patches `registries.version_probe._fetch_version`, which binds the name at import time and so was left reaching the network when a check annotated an unknown block ID.
 
 ### Tests
-- 21 new fixture tests. Full suite: 178 passed.
+- 23 new fixture tests. Full suite: 180 passed.
 
 ### Impact
-`MoogsSoaringStructures`, `MoogsVoyagerStructures-1.21-datapack` and `MoogsTemplesReimagined-1.21-datapack` all pass both new checks. MVS reports the 21 self-inconsistent files as warnings:
+`check_no_particles` is clean across `MoogsSoaringStructures`, `MoogsVoyagerStructures-1.21-datapack` and `MoogsTemplesReimagined-1.21-datapack`.
+
+`check_block_entity_components` passes on MTR and names the reconversion queue on the other two:
 
 ```
-+  PASS  check_block_entity_components   256 files, 2960 block entities, 21 warning(s)
-+  PASS  check_no_particles              256 files, no particle-emitting entities
+   FAIL  check_block_entity_components   60 of 99 file(s) need reconversion     (MSS)
+   FAIL  check_block_entity_components   101 of 256 file(s) need reconversion   (MVS)
+   PASS  check_block_entity_components   118 files, 3213 block entities checked (MTR)
 ```
+
+Those failures are the point of the check, not a regression to work around: they are the files still carrying older converter output. They clear when the projects are re-run.
 
 ## v1.9.0 -- 2026-08-17
 
