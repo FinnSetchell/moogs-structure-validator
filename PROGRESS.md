@@ -1,3 +1,11 @@
+## v1.10.0 additions (2026-08-27)
+- [x] `checks/check_registries.py` -- palette scan no longer sits behind the loot-table early return; the two halves run independently, and the DFU min-version reasoning is stated in the source
+- [x] `checks/check_attribute_ids.py` -- `_ShapeBoundary` table: item attribute modifiers use the 1.20.5 boundary, entity attributes keep 1.21; the 1.21.2 prefix boundary is unchanged for both
+- [x] `checks/check_block_entity_components.py` -- pre-1.20.5 `components` key on any block entity is an ERROR (generalises the sign-only rule); self-inconsistent files above 1.20.5 are a WARN. The "must have it above 1.20.5" direction is not enforced -- surveyed MSS/MVS/MTR and it is a per-file, not per-block-entity, property
+- [x] `checks/check_no_particles.py` -- policy: no `minecraft:area_effect_cloud` carrying `Particle` (pre-1.21.6) or `custom_particle` (1.21.6+)
+- [x] `checks/check_sign_nbt.py` -- components-key rule removed; sign text rules kept
+- [x] `tests/nbt_helpers.py` -- `stub_registries` also patches `registries.version_probe._fetch_version`
+
 ## v1.9.0 additions (2026-08-17)
 - [x] `checks/check_no_enchanted_books.py` -- fails when `minecraft:enchanted_book` appears as a loot-table item entry (the "book vs enchanted_book" bug that silently drops an unenchanted book)
 - [x] `utils/loot_tables.py` -- extracted a generic `iter_matching_loot_entries(json_path, predicate)` walker; `iter_spawn_egg_loot_entries` is now a thin wrapper on top; added `iter_enchanted_book_loot_entries`

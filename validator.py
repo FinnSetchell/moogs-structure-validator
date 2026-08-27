@@ -77,6 +77,7 @@ def _check_modules():
     import checks.check_worldgen_schemas as check_worldgen_schemas
     import checks.check_entity_nbt as check_entity_nbt
     import checks.check_sign_nbt as check_sign_nbt
+    import checks.check_block_entity_components as check_block_entity_components
     import checks.check_biome_tags as check_biome_tags
     import checks.check_containers as check_containers
     import checks.check_jigsaw_pools as check_jigsaw_pools
@@ -86,6 +87,7 @@ def _check_modules():
     import checks.check_entity_nbt_keys as check_entity_nbt_keys
     import checks.check_no_spawn_eggs as check_no_spawn_eggs
     import checks.check_no_enchanted_books as check_no_enchanted_books
+    import checks.check_no_particles as check_no_particles
     import checks.check_version_coverage as check_version_coverage
     import checks.check_book_contents as check_book_contents
     import checks.check_text_components as check_text_components
@@ -107,6 +109,7 @@ def _check_modules():
         ("check_worldgen_schemas", check_worldgen_schemas),
         ("check_entity_nbt", check_entity_nbt),
         ("check_sign_nbt", check_sign_nbt),
+        ("check_block_entity_components", check_block_entity_components),
         ("check_text_components", check_text_components),
         ("check_biome_tags", check_biome_tags),
         ("check_containers", check_containers),
@@ -124,6 +127,7 @@ def _check_modules():
         ("check_entity_nbt_keys", check_entity_nbt_keys),
         ("check_no_spawn_eggs", check_no_spawn_eggs),
         ("check_no_enchanted_books", check_no_enchanted_books),
+        ("check_no_particles", check_no_particles),
     ]
 
 

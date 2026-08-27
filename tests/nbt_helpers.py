@@ -143,8 +143,11 @@ def stub_registries(monkeypatch, entities: set[str] | None = None,
         return dict(VANILLA_VERSION_MAP)
 
     from registries import fetcher as _fetcher
+    from registries import version_probe as _version_probe
     from utils import versions as _versions
     monkeypatch.setattr(_fetcher, "_fetch_version", fake_fetch_version)
+    # version_probe binds _fetch_version at import time, so it needs its own patch.
+    monkeypatch.setattr(_version_probe, "_fetch_version", fake_fetch_version)
     monkeypatch.setattr(_fetcher, "fetch_registry_set", fake_fetch_registry_set)
     monkeypatch.setattr(_versions, "load_version_map", fake_load_version_map)
     # Some check modules import these names directly; redirect their bindings too.

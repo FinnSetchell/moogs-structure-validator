@@ -4,10 +4,11 @@ a check module's `run` against a FakeContext, asserting on the returned
 (passed, summary) tuple and the check's exit signal."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import nbtlib
-from nbtlib import Compound, Double, Int, List, String
+from nbtlib import Byte, Compound, Double, Int, List, String
 
 from tests.nbt_helpers import (
     FakeContext,
@@ -338,6 +339,127 @@ def test_bad_attribute_id_still_fails_alongside_a_modifier(tmp_path, monkeypatch
     assert "1 attribute id error" in summary
 
 
+# ---------- check_attribute_ids: item-sourced modifiers (1.20.5 boundary) ----------
+
+_ATTR = "generic.attack_damage"
+
+
+def _legacy_modifier_sword() -> Compound:
+    """An item stack as 1.20.4 writes it: modifiers under `tag.AttributeModifiers`."""
+    return Compound({
+        "id": String("minecraft:iron_sword"),
+        "Count": Byte(1),
+        "tag": Compound({
+            "AttributeModifiers": List[Compound]([
+                Compound({
+                    "AttributeName": String(_ATTR),
+                    "Name": String(_ATTR),
+                    "Amount": Double(3.0),
+                    "Operation": Int(0),
+                }),
+            ]),
+        }),
+    })
+
+
+def _component_modifier_sword() -> Compound:
+    """The same stack as 1.20.5 writes it: modifiers under `components`."""
+    return Compound({
+        "id": String("minecraft:iron_sword"),
+        "count": Int(1),
+        "components": Compound({
+            "minecraft:attribute_modifiers": Compound({
+                "modifiers": List[Compound]([
+                    Compound({
+                        "type": String(f"minecraft:{_ATTR}"),
+                        "amount": Double(3.0),
+                        "operation": String("add_value"),
+                        "slot": String("mainhand"),
+                    }),
+                ]),
+            }),
+        }),
+    })
+
+
+def _frame_pack(tmp_path, monkeypatch, item: Compound, range_key: str,
+                mc_versions: list[str], data_version: int) -> Path:
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, entities={"minecraft:item_frame"},
+                    items={"minecraft:iron_sword"},
+                    attributes={f"minecraft:{_ATTR}"})
+    frame = Compound({"id": String("minecraft:item_frame"), "Item": item})
+    nbt = structure_nbt(data_version, entities=[entity_entry(frame)])
+    save(nbt, structures / "f.nbt")
+    _wire(pools / "p.json", "test:f", {range_key: "test:f"})
+    return root
+
+
+def test_item_modifiers_in_components_on_1_20_5_target_passes(tmp_path, monkeypatch):
+    """Regression: item modifiers were judged against the 1.21 entity-attribute
+    boundary, so a correct 1.20.5 stack was reported as a shape error."""
+    root = _frame_pack(tmp_path, monkeypatch, _component_modifier_sword(),
+                       "1.20.5-1.20.6", ["1.20.5", "1.20.6"], 3839)
+
+    from checks import check_attribute_ids as mod
+    ctx = FakeContext("test", ["1.20.5", "1.20.6"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_item_modifiers_in_tag_on_1_20_4_target_passes(tmp_path, monkeypatch):
+    root = _frame_pack(tmp_path, monkeypatch, _legacy_modifier_sword(),
+                       "1.20-1.20.4", ["1.20", "1.20.4"], 3700)
+
+    from checks import check_attribute_ids as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_item_modifiers_in_tag_on_1_20_5_target_fails(tmp_path, monkeypatch):
+    root = _frame_pack(tmp_path, monkeypatch, _legacy_modifier_sword(),
+                       "1.20.5-1.20.6", ["1.20.5", "1.20.6"], 3839)
+
+    from checks import check_attribute_ids as mod
+    ctx = FakeContext("test", ["1.20.5", "1.20.6"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_item_modifiers_in_components_on_1_20_4_target_fails(tmp_path, monkeypatch):
+    root = _frame_pack(tmp_path, monkeypatch, _component_modifier_sword(),
+                       "1.20-1.20.4", ["1.20", "1.20.4"], 3700)
+
+    from checks import check_attribute_ids as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_entity_attributes_still_use_the_1_21_boundary(tmp_path, monkeypatch):
+    """Guard against over-correction: moving item modifiers to 1.20.5 must not
+    drag the entity attribute list down with them."""
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, entities={"minecraft:zombie"},
+                    attributes={f"minecraft:{_ATTR}"})
+
+    zombie = Compound({
+        "id": String("minecraft:zombie"),
+        "attributes": List[Compound]([
+            Compound({"id": String(f"minecraft:{_ATTR}"), "base": Double(3.0)}),
+        ]),
+    })
+    nbt = structure_nbt(3839, entities=[entity_entry(zombie)])
+    save(nbt, structures / "z.nbt")
+    _wire(pools / "p.json", "test:z", {"1.20.5-1.20.6": "test:z"})
+
+    from checks import check_attribute_ids as mod
+    ctx = FakeContext("test", ["1.20.5", "1.20.6"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
 # ---------- check_potion_effects ----------
 
 def test_potion_tag_effects_on_1_21_5_fails(tmp_path, monkeypatch):
@@ -448,3 +570,272 @@ def test_wolf_variant_spanning_1_20_5_fails(tmp_path, monkeypatch):
     ctx = FakeContext("test", ["1.20", "1.20.4", "1.20.5", "1.20.6"], root)
     passed, _ = mod.run(ctx)
     assert not passed
+
+
+# ---------- check_no_particles ----------
+
+def _cloud_pack(tmp_path, monkeypatch, cloud: Compound) -> Path:
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, entities={"minecraft:area_effect_cloud"})
+    nbt = structure_nbt(4325, entities=[entity_entry(cloud)])
+    save(nbt, structures / "a.nbt")
+    _wire(pools / "p.json", "test:a", {"1.21.5-1.21.11": "test:a"})
+    return root
+
+
+def test_area_effect_cloud_with_legacy_particle_field_fails(tmp_path, monkeypatch):
+    cloud = Compound({
+        "id": String("minecraft:area_effect_cloud"),
+        "Particle": Compound({"type": String("minecraft:effect")}),
+    })
+    root = _cloud_pack(tmp_path, monkeypatch, cloud)
+
+    from checks import check_no_particles as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_area_effect_cloud_with_custom_particle_field_fails(tmp_path, monkeypatch):
+    cloud = Compound({
+        "id": String("minecraft:area_effect_cloud"),
+        "custom_particle": Compound({"type": String("minecraft:effect")}),
+    })
+    root = _cloud_pack(tmp_path, monkeypatch, cloud)
+
+    from checks import check_no_particles as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_area_effect_cloud_without_a_particle_field_passes(tmp_path, monkeypatch):
+    cloud = Compound({
+        "id": String("minecraft:area_effect_cloud"),
+        "Radius": Double(3.0),
+    })
+    root = _cloud_pack(tmp_path, monkeypatch, cloud)
+
+    from checks import check_no_particles as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_particle_field_on_another_entity_is_not_flagged(tmp_path, monkeypatch):
+    """The policy names area_effect_cloud; a like-named field elsewhere is not it."""
+    zombie = Compound({
+        "id": String("minecraft:zombie"),
+        "custom_particle": Compound({"type": String("minecraft:effect")}),
+    })
+    root = _cloud_pack(tmp_path, monkeypatch, zombie)
+
+    from checks import check_no_particles as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+# ---------- check_block_entity_components ----------
+
+def _block_entity_pack(tmp_path, monkeypatch, entries: list[tuple[str, Compound]],
+                       range_key: str, data_version: int) -> Path:
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, blocks={bid for bid, _ in entries})
+    nbt = structure_nbt(
+        data_version,
+        palette=[Compound({"Name": String(bid)}) for bid, _ in entries],
+        blocks=[block_entry(i, pos=(i, 0, 0), nbt=be) for i, (_, be) in enumerate(entries)],
+    )
+    save(nbt, structures / "c.nbt")
+    _wire(pools / "p.json", "test:c", {range_key: "test:c"})
+    return root
+
+
+def _container(block_id: str, with_components: bool) -> tuple[str, Compound]:
+    be = Compound({"id": String(block_id)})
+    if with_components:
+        be["components"] = Compound({})
+    return block_id, be
+
+
+def test_components_key_below_1_20_5_fails(tmp_path, monkeypatch):
+    """The rule that holds in both directions: the key does not exist before 1.20.5,
+    so a file floored below it must not carry one on any block entity."""
+    root = _block_entity_pack(tmp_path, monkeypatch,
+                              [_container("minecraft:chest", True)], "1.20-1.20.4", 3700)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_no_components_key_below_1_20_5_passes(tmp_path, monkeypatch):
+    root = _block_entity_pack(tmp_path, monkeypatch,
+                              [_container("minecraft:chest", False)], "1.20-1.20.4", 3700)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_file_uniformly_without_components_above_1_20_5_passes_quietly(tmp_path, monkeypatch):
+    """Whole-file absence above 1.20.5 tracks how the file was written, not an
+    authoring bug -- 145 files across the portfolio look like this. Not reportable."""
+    root = _block_entity_pack(tmp_path, monkeypatch, [
+        _container("minecraft:chest", False),
+        _container("minecraft:barrel", False),
+    ], "1.21-1.21.1", 3955)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.21", "1.21.1"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+    assert "0 warning(s)" in summary
+
+
+def test_file_uniformly_with_components_above_1_20_5_passes_quietly(tmp_path, monkeypatch):
+    root = _block_entity_pack(tmp_path, monkeypatch, [
+        _container("minecraft:chest", True),
+        _container("minecraft:barrel", True),
+    ], "1.21-1.21.1", 3955)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.21", "1.21.1"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+    assert "0 warning(s)" in summary
+
+
+def test_file_disagreeing_with_itself_above_1_20_5_warns(tmp_path, monkeypatch):
+    """A non-sign block entity missing the key while its neighbours carry it is the
+    odd one out -- reported, but as a WARN, so it does not fail the check."""
+    root = _block_entity_pack(tmp_path, monkeypatch, [
+        _container("minecraft:chest", True),
+        _container("minecraft:barrel", False),
+    ], "1.21-1.21.1", 3955)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.21", "1.21.1"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+    assert "1 warning(s)" in summary
+
+
+def _json_sign(with_components: bool) -> tuple[str, Compound]:
+    """A pre-1.20.5 sign: JSON-encoded messages, optionally carrying the 1.20.5+ key."""
+    sign = Compound({
+        "id": String("minecraft:oak_sign"),
+        "front_text": Compound({
+            "messages": List[String]([String('{"text":"hi"}')] * 4),
+        }),
+    })
+    if with_components:
+        sign["components"] = Compound({})
+    return "minecraft:oak_sign", sign
+
+
+def test_sign_components_key_now_reported_by_the_general_check(tmp_path, monkeypatch):
+    root = _block_entity_pack(tmp_path, monkeypatch,
+                              [_json_sign(with_components=True)], "1.20-1.20.4", 3700)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_non_sign_block_entity_components_key_is_reported_too(tmp_path, monkeypatch):
+    """The gap this closes: before, only signs were considered at all."""
+    root = _block_entity_pack(tmp_path, monkeypatch,
+                              [_container("minecraft:barrel", True)], "1.20-1.20.4", 3700)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+    from checks import check_sign_nbt as sign_mod
+    assert sign_mod.run(FakeContext("test", ["1.20", "1.20.4"], root))[0]
+
+
+def test_sign_check_keeps_text_rules_and_drops_the_components_rule(tmp_path, monkeypatch):
+    """check_sign_nbt no longer owns the components key; its text rules are untouched."""
+    root = _block_entity_pack(tmp_path, monkeypatch,
+                              [_json_sign(with_components=True)], "1.20-1.20.4", 3700)
+
+    from checks import check_sign_nbt as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_sign_bare_message_on_pre_1_20_5_target_still_fails(tmp_path, monkeypatch):
+    block_id, sign = _json_sign(with_components=False)
+    sign["front_text"] = Compound({"messages": List[String]([String("")] * 4)})
+    root = _block_entity_pack(tmp_path, monkeypatch, [(block_id, sign)], "1.20-1.20.4", 3700)
+
+    from checks import check_sign_nbt as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+# ---------- check_registries ----------
+
+def _palette_pack(tmp_path, block_ids: list[str]) -> Path:
+    root, structures, pools = build_datapack(tmp_path)
+    palette = [Compound({"Name": String(b)}) for b in block_ids]
+    nbt = structure_nbt(4325, palette=palette)
+    save(nbt, structures / "z.nbt")
+    _wire(pools / "p.json", "test:z", {"1.21.5-1.21.11": "test:z"})
+    return root
+
+
+def test_palette_scanned_when_project_has_no_loot_tables(tmp_path, monkeypatch):
+    """Regression: the palette scan sat behind an early return that fired whenever
+    the project had no loot_table directory, so such packs were never scanned."""
+    stub_registries(monkeypatch, blocks={"minecraft:stone"})
+    root = _palette_pack(tmp_path, ["minecraft:stone", "minecraft:not_a_real_block"])
+    assert not (root / "src" / "main" / "resources" / "data" / "test" / "loot_table").exists()
+
+    from checks import check_registries as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, summary = mod.run(ctx)
+    assert not passed
+    assert "palettes" in summary
+
+
+def test_clean_palette_with_no_loot_tables_passes(tmp_path, monkeypatch):
+    stub_registries(monkeypatch, blocks={"minecraft:stone"})
+    root = _palette_pack(tmp_path, ["minecraft:stone"])
+
+    from checks import check_registries as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, summary = mod.run(ctx)
+    assert passed
+    assert "no loot tables" in summary
+
+
+def test_bad_palette_still_fails_alongside_loot_tables(tmp_path, monkeypatch):
+    """The inverse guard: a present loot_table directory must not mask the palette half."""
+    stub_registries(monkeypatch, blocks={"minecraft:stone"}, items={"minecraft:diamond"})
+    root = _palette_pack(tmp_path, ["minecraft:stone", "minecraft:not_a_real_block"])
+
+    loot_dir = root / "src" / "main" / "resources" / "data" / "test" / "loot_table"
+    loot_dir.mkdir(parents=True)
+    (loot_dir / "chest.json").write_text(json.dumps({
+        "type": "minecraft:chest",
+        "pools": [{
+            "rolls": 1,
+            "entries": [{"type": "minecraft:item", "name": "minecraft:diamond"}],
+        }],
+    }), encoding="utf-8")
+
+    from checks import check_registries as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, summary = mod.run(ctx)
+    assert not passed
+    assert "palettes" in summary

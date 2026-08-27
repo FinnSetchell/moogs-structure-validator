@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, TYPE_CHECKING
 
 import nbtlib
 
 from registries.fetcher import fetch_registry_set
-from utils.boundaries import DV_1_21, DV_1_21_2, BoundarySide, side_of
+from utils.boundaries import DV_1_20_5, DV_1_21, DV_1_21_2, BoundarySide, side_of
 from utils.entity_walk import iter_entities
 from utils.nbt_cache import load_nbt
 from utils.nbt_versions import _build_nbt_version_ranges, _parse_version
@@ -18,6 +19,45 @@ if TYPE_CHECKING:
 
 
 _PREFIXES = ("generic.", "player.", "zombie.")
+
+
+@dataclass(frozen=True)
+class _ShapeBoundary:
+    """Where the *shape* of an attribute list changes, per place the list lives.
+
+    Entity attributes and an item stack's attribute modifiers are two different
+    things and moved on two different releases. Entity `Attributes` became
+    `attributes` at 1.21. An item's modifiers travelled with the rest of item NBT
+    a full release earlier, at 1.20.5, when `tag` became `components` -- so a file
+    floored at 1.20.5 carrying item modifiers under `components` is correct, and
+    judging it against the 1.21 boundary reports a shape error that isn't there.
+
+    Naming (the `generic.` prefix) is a separate 1.21.2 boundary and applies to
+    both; it is handled below, outside this table.
+    """
+    dv: int
+    version: str
+    legacy: str      # what the pre-boundary form is called, for error text
+    new: str         # what the post-boundary form is called
+    label: str       # how to refer to the list as a whole
+
+
+_SHAPE_BOUNDARIES: dict[str, _ShapeBoundary] = {
+    "entity": _ShapeBoundary(
+        dv=DV_1_21,
+        version="1.21",
+        legacy="`Attributes` list",
+        new="`attributes` list",
+        label="attribute list",
+    ),
+    "item": _ShapeBoundary(
+        dv=DV_1_20_5,
+        version="1.20.5",
+        legacy="`tag.AttributeModifiers`",
+        new="`components.minecraft:attribute_modifiers`",
+        label="item attribute modifiers",
+    ),
+}
 
 
 def _strip_ns(id_: str) -> str:
@@ -130,10 +170,14 @@ def _iter_block_items(nbt: nbtlib.Compound) -> Iterator[tuple[str, nbtlib.Compou
                 yield f"{base}.{field}", it
 
 
-def _flag(attr_id: str, path: str, rel: str, shape: str,
+def _flag(attr_id: str, path: str, rel: str, shape: str, origin: str,
           min_v: str, max_v: str, min_dv: int, max_dv: int,
           valid_min: set[str] | None, valid_max: set[str] | None) -> list[str]:
-    """Flag an attribute id if its prefix form is wrong for the target range.
+    """Flag an attribute id if its shape or prefix form is wrong for the target range.
+
+    `origin` says where the id was found -- "entity" for an entity's own attribute
+    list, "item" for an item stack's attribute modifiers -- and picks the shape
+    boundary, since the two moved on different releases (see `_SHAPE_BOUNDARIES`).
 
     Uses per-version `attribute` registry when available: an id must appear in
     both the min-version and max-version registries. If either lookup misses,
@@ -145,25 +189,27 @@ def _flag(attr_id: str, path: str, rel: str, shape: str,
     unfq = f"minecraft:{bare[bare.index('.') + 1:]}" if prefixed else fq
     fqfq = f"minecraft:generic.{bare}" if not prefixed else fq
 
-    # Boundary at 1.21 (Attributes -> attributes): only shape-check here.
-    field_side = side_of(min_dv, max_dv, DV_1_21)
+    # Shape boundary: 1.21 for entity attributes, 1.20.5 for item modifiers.
+    b = _SHAPE_BOUNDARIES[origin]
+    field_side = side_of(min_dv, max_dv, b.dv)
     errors: list[str] = []
     if shape == "legacy" and field_side == BoundarySide.NEW:
         errors.append(
-            f"[ERROR] {rel}: {path}: legacy `Attributes` list on a min>=1.21 target"
-            f" ({min_v}); use `attributes` with namespaced ids at 1.21+"
+            f"[ERROR] {rel}: {path}: legacy {b.legacy} on a min>={b.version} target"
+            f" ({min_v}); use {b.new} at {b.version}+"
         )
         return errors
     if shape == "new" and field_side == BoundarySide.OLD:
         errors.append(
-            f"[ERROR] {rel}: {path}: new `attributes` list on a max<1.21 target"
-            f" ({max_v}); use `Attributes` with `Name`/`Base` before 1.21"
+            f"[ERROR] {rel}: {path}: new {b.new} on a max<{b.version} target"
+            f" ({max_v}); use {b.legacy} before {b.version}"
         )
         return errors
     if field_side == BoundarySide.SPANS:
         errors.append(
-            f"[ERROR] {rel}: {path}: attribute list across range {min_v}..{max_v}"
-            f" spans 1.21 (Attributes -> attributes rename); no single shape works on both sides"
+            f"[ERROR] {rel}: {path}: {b.label} across range {min_v}..{max_v}"
+            f" spans {b.version} ({b.legacy} -> {b.new});"
+            f" no single shape works on both sides"
         )
         return errors
 
@@ -283,14 +329,14 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             for attr_id, path, shape in _iter_entity_attribute_ids(entity_nbt, entity_path):
                 attrs_checked += 1
                 errors.extend(_flag(
-                    attr_id, path, rel, shape,
+                    attr_id, path, rel, shape, "entity",
                     file_min, file_max, min_dv, max_dv, valid_min, valid_max,
                 ))
             for slot_path, item in _iter_entity_items(entity_nbt, entity_path):
                 for attr_id, path, shape in _iter_item_attribute_ids(item, slot_path):
                     attrs_checked += 1
                     errors.extend(_flag(
-                        attr_id, path, rel, shape,
+                        attr_id, path, rel, shape, "item",
                         file_min, file_max, min_dv, max_dv, valid_min, valid_max,
                     ))
 
@@ -298,7 +344,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             for attr_id, path, shape in _iter_item_attribute_ids(item, slot_path):
                 attrs_checked += 1
                 errors.extend(_flag(
-                    attr_id, path, rel, shape,
+                    attr_id, path, rel, shape, "item",
                     file_min, file_max, min_dv, max_dv, valid_min, valid_max,
                 ))
 

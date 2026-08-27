@@ -75,44 +75,58 @@ def _is_valid(id_: str, valid_set: set[str], extra_ids: set[str]) -> bool:
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
     namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
     loot_table_dir = data_dir(namespace_root, "loot_table")
+    structure_dir = data_dir(namespace_root, "structure")
 
-    if not loot_table_dir.exists():
-        print("  no loot table directory — skipped")
-        return True, "skipped (no loot tables)"
-
-    all_items: set[str] = set()
-    all_blocks: set[str] = set()
-
-    for json_path in sorted(loot_table_dir.rglob("*.json")):
-        try:
-            with json_path.open(encoding="utf-8-sig") as f:
-                data = json.load(f)
-        except json.JSONDecodeError:
-            continue
-        _collect_ids(data, all_items, all_blocks)
+    have_loot_tables = loot_table_dir.exists()
+    if not have_loot_tables and not structure_dir.exists():
+        print("  no loot table or structure directory — skipped")
+        return True, "skipped (nothing to scan)"
 
     cache_dir = Path(__file__).parent.parent / "cache"
     global_min_version = min(ctx.mc_versions, key=_parse_version)
 
-    lt_vdata = _fetch_version(global_min_version, cache_dir, ctx.refresh)
-    valid_items_min = (
-        {"minecraft:" + n for n in lt_vdata.get("item", [])}
-        | {i for i in ctx.valid_items if not i.startswith("minecraft:")}
-    )
-    valid_blocks_min = (
-        {"minecraft:" + n for n in lt_vdata.get("block", [])}
-        | {b for b in ctx.valid_blocks if not b.startswith("minecraft:")}
-    )
+    # The loot-table half and the palette half are independent: a pack with no
+    # loot tables still has NBT palettes worth scanning, and vice versa.
+    unknown_items: list[str] = []
+    unknown_blocks: list[str] = []
 
-    unknown_items = sorted(
-        id_ for id_ in all_items if not _is_valid(id_, valid_items_min, ctx.extra_ids)
-    )
-    unknown_blocks = sorted(
-        id_ for id_ in all_blocks if not _is_valid(id_, valid_blocks_min, ctx.extra_ids)
-    )
+    if have_loot_tables:
+        all_items: set[str] = set()
+        all_blocks: set[str] = set()
 
-    # NBT palette scan — grouped by block ID
-    structure_dir = data_dir(namespace_root, "structure")
+        for json_path in sorted(loot_table_dir.rglob("*.json")):
+            try:
+                with json_path.open(encoding="utf-8-sig") as f:
+                    data = json.load(f)
+            except json.JSONDecodeError:
+                continue
+            _collect_ids(data, all_items, all_blocks)
+
+        lt_vdata = _fetch_version(global_min_version, cache_dir, ctx.refresh)
+        valid_items_min = (
+            {"minecraft:" + n for n in lt_vdata.get("item", [])}
+            | {i for i in ctx.valid_items if not i.startswith("minecraft:")}
+        )
+        valid_blocks_min = (
+            {"minecraft:" + n for n in lt_vdata.get("block", [])}
+            | {b for b in ctx.valid_blocks if not b.startswith("minecraft:")}
+        )
+
+        unknown_items = sorted(
+            id_ for id_ in all_items if not _is_valid(id_, valid_items_min, ctx.extra_ids)
+        )
+        unknown_blocks = sorted(
+            id_ for id_ in all_blocks if not _is_valid(id_, valid_blocks_min, ctx.extra_ids)
+        )
+
+    # NBT palette scan — grouped by block ID.
+    #
+    # Each file is checked against its *minimum* covered version only. On load the
+    # game runs the structure through DataFixerUpper keyed on the file's own
+    # DataVersion, so blocks renamed in a later version (chain -> iron_chain,
+    # grass -> short_grass) are re-mapped upward for us. A palette that is valid at
+    # the file's floor is therefore valid at every version above it — only the
+    # floor can fail, so checking every covered version would only invent errors.
     template_pool_dir = namespace_root / "worldgen" / "template_pool"
     by_block: dict[str, list[str]] = defaultdict(list)
     nbt_min_versions: dict[Path, str] = {}
@@ -156,7 +170,9 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                     seen_in_file.add(name)
 
     # print loot table results
-    if unknown_items or unknown_blocks:
+    if not have_loot_tables:
+        print("  loot tables: no loot table directory — skipped")
+    elif unknown_items or unknown_blocks:
         if unknown_items:
             print(f"  loot tables: {len(unknown_items)} unknown item ID(s):")
             for id_ in unknown_items:
@@ -198,6 +214,11 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         parts.append(f"{len(unknown_blocks)} unknown block(s) in loot tables")
     if by_block:
         parts.append(f"{len(by_block)} unknown block type(s) in palettes")
-    summary = ", ".join(parts) if parts else "all IDs valid"
+    if parts:
+        summary = ", ".join(parts)
+    elif have_loot_tables:
+        summary = "all IDs valid"
+    else:
+        summary = "all palette IDs valid (no loot tables)"
 
     return overall_pass, summary
