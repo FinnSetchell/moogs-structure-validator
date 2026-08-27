@@ -4,6 +4,7 @@ a check module's `run` against a FakeContext, asserting on the returned
 (passed, summary) tuple and the check's exit signal."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import nbtlib
@@ -448,3 +449,61 @@ def test_wolf_variant_spanning_1_20_5_fails(tmp_path, monkeypatch):
     ctx = FakeContext("test", ["1.20", "1.20.4", "1.20.5", "1.20.6"], root)
     passed, _ = mod.run(ctx)
     assert not passed
+
+
+# ---------- check_registries ----------
+
+def _palette_pack(tmp_path, block_ids: list[str]) -> Path:
+    root, structures, pools = build_datapack(tmp_path)
+    palette = [Compound({"Name": String(b)}) for b in block_ids]
+    nbt = structure_nbt(4325, palette=palette)
+    save(nbt, structures / "z.nbt")
+    _wire(pools / "p.json", "test:z", {"1.21.5-1.21.11": "test:z"})
+    return root
+
+
+def test_palette_scanned_when_project_has_no_loot_tables(tmp_path, monkeypatch):
+    """Regression: the palette scan sat behind an early return that fired whenever
+    the project had no loot_table directory, so such packs were never scanned."""
+    stub_registries(monkeypatch, blocks={"minecraft:stone"})
+    root = _palette_pack(tmp_path, ["minecraft:stone", "minecraft:not_a_real_block"])
+    assert not (root / "src" / "main" / "resources" / "data" / "test" / "loot_table").exists()
+
+    from checks import check_registries as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, summary = mod.run(ctx)
+    assert not passed
+    assert "palettes" in summary
+
+
+def test_clean_palette_with_no_loot_tables_passes(tmp_path, monkeypatch):
+    stub_registries(monkeypatch, blocks={"minecraft:stone"})
+    root = _palette_pack(tmp_path, ["minecraft:stone"])
+
+    from checks import check_registries as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, summary = mod.run(ctx)
+    assert passed
+    assert "no loot tables" in summary
+
+
+def test_bad_palette_still_fails_alongside_loot_tables(tmp_path, monkeypatch):
+    """The inverse guard: a present loot_table directory must not mask the palette half."""
+    stub_registries(monkeypatch, blocks={"minecraft:stone"}, items={"minecraft:diamond"})
+    root = _palette_pack(tmp_path, ["minecraft:stone", "minecraft:not_a_real_block"])
+
+    loot_dir = root / "src" / "main" / "resources" / "data" / "test" / "loot_table"
+    loot_dir.mkdir(parents=True)
+    (loot_dir / "chest.json").write_text(json.dumps({
+        "type": "minecraft:chest",
+        "pools": [{
+            "rolls": 1,
+            "entries": [{"type": "minecraft:item", "name": "minecraft:diamond"}],
+        }],
+    }), encoding="utf-8")
+
+    from checks import check_registries as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, summary = mod.run(ctx)
+    assert not passed
+    assert "palettes" in summary
