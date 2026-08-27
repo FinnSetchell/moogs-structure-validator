@@ -7,6 +7,7 @@ from pathlib import Path
 from tests.nbt_helpers import FakeContext
 
 from checks import check_processor_rules as mod
+from checks.check_processor_rules import _collect_block_ids
 
 
 def _write_processor_list(root: Path, namespace: str, name: str, processors: list[dict]) -> None:
@@ -123,3 +124,91 @@ def test_unparseable_file_fails(tmp_path):
     path.write_text("{not json", encoding="utf-8")
     passed, _ = mod.run(_ctx(tmp_path))
     assert not passed
+
+
+# ---------- _collect_block_ids: NBT payloads are not block states ----------
+
+def test_entity_nbt_names_are_not_block_ids():
+    """Pre-1.20.5 attribute modifiers use a "Name" key that is not a block ID."""
+    ids: list[str] = []
+    _collect_block_ids(
+        [
+            {
+                "processor_type": "moogs_structures:spawner_randomizing_processor",
+                "weighted_entities": [
+                    {
+                        "entity": "minecraft:husk",
+                        "weight": 1,
+                        "nbt": {
+                            "attributes": [
+                                {"Name": "minecraft:generic.max_health", "Base": 35.0}
+                            ]
+                        },
+                    }
+                ],
+            }
+        ],
+        ids,
+    )
+    assert ids == []
+
+
+def test_legacy_item_display_name_is_not_a_block_id():
+    """Pre-1.20.5 item tags carry display.Name, which is not a block ID."""
+    ids: list[str] = []
+    _collect_block_ids(
+        [
+            {
+                "processor_type": "moogs_structures:equip_armor_stand_processor",
+                "armor": {
+                    "chest": {
+                        "id": "minecraft:iron_chestplate",
+                        "Count": 1,
+                        "tag": {"display": {"Name": "minecraft:not_a_block"}},
+                    }
+                },
+            }
+        ],
+        ids,
+    )
+    assert ids == []
+
+
+def test_rule_processor_block_states_are_still_collected():
+    """The real block states a rule processor names must still be validated."""
+    ids: list[str] = []
+    _collect_block_ids(
+        [
+            {
+                "processor_type": "minecraft:rule",
+                "rules": [
+                    {
+                        "input_predicate": {
+                            "predicate_type": "minecraft:random_block_match",
+                            "block": "minecraft:stone",
+                            "probability": 0.05,
+                        },
+                        "output_state": {"Name": "minecraft:infested_stone"},
+                    }
+                ],
+            }
+        ],
+        ids,
+    )
+    assert ids == ["minecraft:stone", "minecraft:infested_stone"]
+
+
+def test_block_tag_references_are_skipped():
+    ids: list[str] = []
+    _collect_block_ids(
+        [
+            {
+                "processor_type": "minecraft:rule",
+                "rules": [
+                    {"input_predicate": {"block": "#minecraft:base_stone_overworld"}}
+                ],
+            }
+        ],
+        ids,
+    )
+    assert ids == []

@@ -11,6 +11,12 @@
 
   The origin ("entity" or "item") is now threaded through to `_flag()` and selects the boundary from a small table. The 1.21.2 prefix boundary (`generic.max_health` -> `max_health`) is unchanged and still applies to both, as it always did.
 
+- **`check_processor_rules` read entity and item NBT as block states.** `_collect_block_ids` recursed into every dict and harvested any `Name` or `block` string containing a colon. That is right for block states (`output_state.Name`, `input_predicate.block`) but it also descended into `weighted_entities[].nbt` and item `tag` payloads, and vanilla NBT reuses both key names for unrelated things: `nbt.attributes[].Name` is a pre-1.20.5 attribute modifier id, `tag.display.Name` is an item display name, `nbt.carriedBlockState.Name` is an entity's carried block. The check then reported those strings as missing block IDs and failed the run.
+
+  Only pre-1.20.5 data trips it -- from 1.21 attributes serialise as `{"id": ..., "base": ...}` with no `Name` key -- so it hit `1.20-datapack` branches only. Recursion now skips `nbt` and `tag` payloads.
+
+  Verified on `MoogsTemplesReimagined`, which ships the same processor lists on both a 1.20 and a 1.21 branch: the 1.20 branch dropped exactly `generic.armor`, `generic.attack_damage`, `generic.max_health` and `generic.movement_speed`, the 1.21 branch was unchanged, and both branches now collect an identical set of block IDs. No true positive is lost.
+
 ### Added
 - **`check_block_entity_components`** -- the `components` key on a block entity arrived at 1.20.5, and each per-version variant is emitted by that era's own game writer, so the rule is symmetric and both halves are errors, keyed on the file's minimum covered version:
 

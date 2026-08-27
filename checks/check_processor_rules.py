@@ -10,12 +10,19 @@ if TYPE_CHECKING:
     from validator import ValidatorContext
 
 
+# Entity/item NBT payloads. Vanilla NBT reuses "Name" (attribute modifiers on
+# pre-1.20.5 entities, item display names) and "block" (e.g. carriedBlockState),
+# so recursing into these yields strings that are not block IDs.
+_NBT_PAYLOAD_KEYS = {"nbt", "tag"}
+
+
 def _collect_block_ids(obj: object, out: list[str]) -> None:
     """Recursively collect block IDs from a processor JSON value.
 
     Targets any dict with a "Name" key (block state objects) and any
     string-valued "block" key (input_predicate.block style). Tag refs
-    starting with "#" are skipped.
+    starting with "#" are skipped, as are entity/item NBT payloads, whose
+    "Name"/"block" keys are not block IDs.
     """
     if isinstance(obj, dict):
         name = obj.get("Name")
@@ -24,8 +31,10 @@ def _collect_block_ids(obj: object, out: list[str]) -> None:
         block = obj.get("block")
         if isinstance(block, str) and ":" in block and not block.startswith("#"):
             out.append(block)
-        for v in obj.values():
-            _collect_block_ids(v, out)
+        for key, value in obj.items():
+            if key in _NBT_PAYLOAD_KEYS:
+                continue
+            _collect_block_ids(value, out)
     elif isinstance(obj, list):
         for item in obj:
             _collect_block_ids(item, out)
