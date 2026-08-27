@@ -572,6 +572,70 @@ def test_wolf_variant_spanning_1_20_5_fails(tmp_path, monkeypatch):
     assert not passed
 
 
+# ---------- check_no_particles ----------
+
+def _cloud_pack(tmp_path, monkeypatch, cloud: Compound) -> Path:
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, entities={"minecraft:area_effect_cloud"})
+    nbt = structure_nbt(4325, entities=[entity_entry(cloud)])
+    save(nbt, structures / "a.nbt")
+    _wire(pools / "p.json", "test:a", {"1.21.5-1.21.11": "test:a"})
+    return root
+
+
+def test_area_effect_cloud_with_legacy_particle_field_fails(tmp_path, monkeypatch):
+    cloud = Compound({
+        "id": String("minecraft:area_effect_cloud"),
+        "Particle": Compound({"type": String("minecraft:effect")}),
+    })
+    root = _cloud_pack(tmp_path, monkeypatch, cloud)
+
+    from checks import check_no_particles as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_area_effect_cloud_with_custom_particle_field_fails(tmp_path, monkeypatch):
+    cloud = Compound({
+        "id": String("minecraft:area_effect_cloud"),
+        "custom_particle": Compound({"type": String("minecraft:effect")}),
+    })
+    root = _cloud_pack(tmp_path, monkeypatch, cloud)
+
+    from checks import check_no_particles as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, _ = mod.run(ctx)
+    assert not passed
+
+
+def test_area_effect_cloud_without_a_particle_field_passes(tmp_path, monkeypatch):
+    cloud = Compound({
+        "id": String("minecraft:area_effect_cloud"),
+        "Radius": Double(3.0),
+    })
+    root = _cloud_pack(tmp_path, monkeypatch, cloud)
+
+    from checks import check_no_particles as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_particle_field_on_another_entity_is_not_flagged(tmp_path, monkeypatch):
+    """The policy names area_effect_cloud; a like-named field elsewhere is not it."""
+    zombie = Compound({
+        "id": String("minecraft:zombie"),
+        "custom_particle": Compound({"type": String("minecraft:effect")}),
+    })
+    root = _cloud_pack(tmp_path, monkeypatch, zombie)
+
+    from checks import check_no_particles as mod
+    ctx = FakeContext("test", ["1.21.5", "1.21.11"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
 # ---------- check_block_entity_components ----------
 
 def _block_entity_pack(tmp_path, monkeypatch, block_id: str, block_nbt: Compound,
