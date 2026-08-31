@@ -132,14 +132,24 @@ def _check_book_item(
     if isinstance(pages, list):
         if len(pages) == 0:
             warnings.append(f"[WARN] {rel}: {pages_path or path}: empty `pages`")
-        else:
+        elif item_id == "minecraft:written_book":
+            # Written book pages only. The 1.21.5 boundary is about how a *text component*
+            # serialises, and only `written_book_content` pages are text components. A
+            # `writable_book_content` page is a plain string on every version (the game
+            # models it as Filterable<String>, not Filterable<Component>), so nothing about
+            # it changes at 1.21.5 and there is nothing here to get wrong.
             page_side = side_of(min_dv, max_dv, DV_1_21_5)
             for i, page in enumerate(pages):
                 unwrapped = _unwrap_filterable(page)
                 if not isinstance(unwrapped, str):
                     continue
-                page_is_json = _is_json_object_string(unwrapped)
-                if page_side == BoundarySide.NEW and page_is_json:
+                if not _is_json_object_string(unwrapped):
+                    # Plain text is a valid page on both sides of 1.21.5: before it, an
+                    # unquoted string is legacy-parsed as literal text; after it, a bare
+                    # string is exactly what SNBT wants. Only a JSON-object string is
+                    # side-specific.
+                    continue
+                if page_side == BoundarySide.NEW:
                     errors.append(
                         f"[ERROR] {rel}: {pages_path}[{i}]: JSON-string page on a min>=1.21.5"
                         f" target ({min_version}); at 1.21.5+ pages are SNBT compounds or bare"
@@ -147,7 +157,7 @@ def _check_book_item(
                     )
                 elif page_side == BoundarySide.SPANS:
                     errors.append(
-                        f"[ERROR] {rel}: {pages_path}[{i}]: book page encoding across range"
+                        f"[ERROR] {rel}: {pages_path}[{i}]: JSON-string page but wired range"
                         f" {min_version}..{max_version} spans 1.21.5; JSON-string and SNBT"
                         f" pages are incompatible, no single value works on both sides"
                     )

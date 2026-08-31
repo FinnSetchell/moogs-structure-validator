@@ -1,5 +1,14 @@
 # changelog
 
+## v1.10.1 -- 2026-08-31
+
+### Fixed
+- **`check_book_contents` failed any book page on a range spanning 1.21.5, even plain text.** The `SPANS` branch computed `page_is_json` and then ignored it, so a page only had to be a string to be reported. Plain text is a valid page on both sides of the boundary -- before 1.21.5 an unquoted string is legacy-parsed as literal text, after it a bare string is exactly what SNBT wants -- so only a JSON-object string is side-specific. The branch now requires `page_is_json`, matching the `NEW` branch beside it.
+
+- **The 1.21.5 page rule was applied to writable books, which have no text components.** The boundary is about how a *text component* serialises, and only `written_book_content` pages are text components; a `writable_book_content` page is a plain string on every version (the game models it as `Filterable<String>`, not `Filterable<Component>`). Nothing about it changes at 1.21.5, so the page-encoding checks now run for `minecraft:written_book` only. The `tag`-vs-`components` 1.20.5 rules still apply to both book types, as they always did.
+
+  Either fix alone clears the observed case; both are correct and both are in. Found on `MoogsVoyagerStructures-1.21-datapack`: `1_21_0/other_decoration/lecturn_garden.nbt` holds a `writable_book` whose single page is `{raw: "Entry one:..."}` -- plain text in a writable book, flagged on a 1.21..26.2 range. That branch goes 29/29.
+
 ## v1.10.0 -- 2026-08-31
 
 ### Fixed

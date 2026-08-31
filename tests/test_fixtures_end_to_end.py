@@ -149,6 +149,76 @@ def test_book_bare_string_page_on_1_21_5_passes(tmp_path, monkeypatch):
     assert passed
 
 
+def _book_pack(tmp_path, monkeypatch, item: Compound, dv: int, wired: str, versions: list[str]):
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, entities={"minecraft:item_frame"},
+                    items={"minecraft:written_book", "minecraft:writable_book"})
+    frame = Compound({"id": String("minecraft:item_frame"), "Item": item})
+    save(structure_nbt(dv, entities=[entity_entry(frame)]), structures / "b.nbt")
+    _wire(pools / "p.json", "test:b", {wired: "test:b"})
+    return FakeContext("test", versions, root)
+
+
+def _book_item(item_id: str, comp_key: str, page) -> Compound:
+    return Compound({
+        "id": String(item_id),
+        "count": Int(1),
+        "components": Compound({comp_key: Compound({"pages": List[Compound]([
+            Compound({"raw": page}),
+        ])})}),
+    })
+
+
+def test_plain_text_page_across_the_1_21_5_boundary_passes(tmp_path, monkeypatch):
+    """Plain text is a valid page on both sides of 1.21.5, so a range that spans the
+    boundary is fine -- only a JSON-object string is side-specific."""
+    item = _book_item("minecraft:written_book", "minecraft:written_book_content",
+                      String("Entry one: the harbour"))
+    ctx = _book_pack(tmp_path, monkeypatch, item, 4325, "1.21-1.21.11",
+                     ["1.21", "1.21.4", "1.21.5", "1.21.11"])
+
+    from checks import check_book_contents as mod
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_json_page_across_the_1_21_5_boundary_still_fails(tmp_path, monkeypatch):
+    item = _book_item("minecraft:written_book", "minecraft:written_book_content",
+                      String('{"text":"Entry one"}'))
+    ctx = _book_pack(tmp_path, monkeypatch, item, 4325, "1.21-1.21.11",
+                     ["1.21", "1.21.4", "1.21.5", "1.21.11"])
+
+    from checks import check_book_contents as mod
+    passed, summary = mod.run(ctx)
+    assert not passed
+    assert "spans 1.21.5" in summary or "error" in summary
+
+
+def test_writable_book_page_is_never_a_text_component(tmp_path, monkeypatch):
+    """writable_book_content pages are plain strings on every version, so the 1.21.5
+    text-component boundary does not apply to them at all."""
+    item = _book_item("minecraft:writable_book", "minecraft:writable_book_content",
+                      String("Entry one: the harbour"))
+    ctx = _book_pack(tmp_path, monkeypatch, item, 4325, "1.21-1.21.11",
+                     ["1.21", "1.21.4", "1.21.5", "1.21.11"])
+
+    from checks import check_book_contents as mod
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_writable_book_json_looking_page_is_left_alone(tmp_path, monkeypatch):
+    """Even a page that happens to look like JSON is just text in a writable book."""
+    item = _book_item("minecraft:writable_book", "minecraft:writable_book_content",
+                      String('{"text":"not a component here"}'))
+    ctx = _book_pack(tmp_path, monkeypatch, item, 4325, "1.21-1.21.11",
+                     ["1.21", "1.21.4", "1.21.5", "1.21.11"])
+
+    from checks import check_book_contents as mod
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
 # ---------- check_text_components ----------
 
 def test_json_custom_name_on_1_21_5_fails(tmp_path, monkeypatch):

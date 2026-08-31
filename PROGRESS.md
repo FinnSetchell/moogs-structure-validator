@@ -1,3 +1,6 @@
+## v1.10.1 fixes (2026-08-31)
+- [x] `checks/check_book_contents.py` -- the 1.21.5 SPANS branch now requires `page_is_json` (it computed the flag then ignored it, failing plain-text pages); page-encoding checks restricted to `written_book`, since `writable_book_content` pages are plain strings on every version
+
 ## v1.10.0 additions (2026-08-27)
 - [x] `checks/check_registries.py` -- palette scan no longer sits behind the loot-table early return; the two halves run independently, and the DFU min-version reasoning is stated in the source
 - [x] `checks/check_attribute_ids.py` -- `_ShapeBoundary` table: item attribute modifiers use the 1.20.5 boundary, entity attributes keep 1.21; the 1.21.2 prefix boundary is unchanged for both
