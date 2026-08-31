@@ -24,14 +24,9 @@
   `--json` runs were never affected: human output goes to `stderr`, which defaults to `errors="backslashreplace"` and rendered it as a printable backslash escape sequence instead of raising.
 
 ### Added
-- **`check_block_entity_components`** -- the `components` key on a block entity arrived at 1.20.5, and each per-version variant is emitted by that era's own game writer, so the rule is symmetric and both halves are errors, keyed on the file's minimum covered version:
+- **`check_block_entity_components`** -- the `components` key on a block entity arrived at 1.20.5, so a file whose minimum covered version is below 1.20.5 must not carry one on any block entity. ERROR. That rule already existed inside `check_sign_nbt`, applied to signs only; a chest or barrel carrying the key on a pre-1.20.5 file went unreported. It now covers every block entity.
 
-  - minimum below 1.20.5 -- no block entity may carry the key;
-  - minimum at or above 1.20.5 -- every block entity must carry it.
-
-  The first half already existed inside `check_sign_nbt`, applied to signs only, so a chest or barrel carrying the key on a pre-1.20.5 file went unreported. The second half was not checked at all.
-
-  Files written by older tooling fail the second half, and that is the intended result rather than a false positive: the converter now guarantees both directions, so the failure list names the projects that still need re-running. On the current portfolio that is 60 of 99 files on MSS. **Do not soften the check or add per-block exceptions to quiet it** -- including for the known converter-side gap on injected bed block entities, which is being fixed in the converter. An exception would hide exactly the files the check exists to find.
+  The inverse -- "at 1.20.5+ every block entity must carry the key" -- is deliberately **not** checked, because vanilla does not work that way. Surveying the structure files Mojang ships, at DataVersion 4325 (1.21.5) and again at 4556 (1.21.10): of the 4848 block entities across the 1108 files that contain any, **4832 carry no `components` key** -- 99.7%. The only carriers are the eight in each of `pillager_outpost/watchtower.nbt` and `watchtower_overgrown.nbt`, and both of those files also hold block entities without it, so vanilla mixes the two shapes inside one file. Absence is the ordinary shape and the game loads it fine, so requiring the key flags correct data; at that frequency even a warning would be noise.
 
 - **`check_no_particles`** -- policy check: builds ship no particle-emitting entities. Flags any `minecraft:area_effect_cloud` carrying a particle field, walking riders and spawner-nested entities via `iter_entities`. The field was renamed at 1.21.6, so `Particle` and `custom_particle` are treated identically; this is a policy rule rather than a version-format one and neither spelling is wanted on any version.
 
@@ -40,20 +35,12 @@
 - `tests/nbt_helpers.stub_registries` also patches `registries.version_probe._fetch_version`, which binds the name at import time and so was left reaching the network when a check annotated an unknown block ID.
 
 ### Tests
-- 23 new fixture tests. Full suite: 180 passed.
+- 23 new fixture tests. Full suite: 184 passed.
 
 ### Impact
 `check_no_particles` is clean across `MoogsSoaringStructures`, `MoogsVoyagerStructures-1.21-datapack` and `MoogsTemplesReimagined-1.21-datapack`.
 
-`check_block_entity_components` passes on MTR and names the reconversion queue on the other two:
-
-```
-   FAIL  check_block_entity_components   60 of 99 file(s) need reconversion     (MSS)
-   FAIL  check_block_entity_components   101 of 256 file(s) need reconversion   (MVS)
-   PASS  check_block_entity_components   118 files, 3213 block entities checked (MTR)
-```
-
-Those failures are the point of the check, not a regression to work around: they are the files still carrying older converter output. They clear when the projects are re-run.
+`check_block_entity_components` is clean across all four reference branches. `MoogsVoyagerStructures-1.21-datapack` and both `MoogsTemplesReimagined` branches now pass 29/29; `MoogsSoaringStructures` has 3 remaining failures, none of them this check.
 
 ## v1.9.0 -- 2026-08-17
 

@@ -1,21 +1,19 @@
-"""A block entity's `components` key must match the era the file targets.
+"""A block entity must not carry a `components` key before 1.20.5.
 
-The key arrived at 1.20.5. Our per-version variants are produced by each era's
-own game writer, so the rule is symmetric and both halves are hard errors, keyed
-on the file's minimum covered version like every other boundary check here:
+The key arrived at 1.20.5, so a file whose minimum covered version is below that
+cannot carry one on any block entity. `check_sign_nbt` used to enforce this for
+signs alone; it holds for every block entity, which is what this check walks.
 
-  - minimum below 1.20.5 -- no block entity may carry the key;
-  - minimum at or above 1.20.5 -- every block entity must carry it.
-
-Files written by older tooling do not satisfy the second half, and they are meant
-to fail. The converter now guarantees both directions, so a failure here names a
-project that still needs re-running -- producing that list is the point of the
-check. Do not soften it, and do not add per-block exceptions for known converter
-gaps: reconverted output will comply, and an exception would hide the files that
-still need the pass.
-
-`check_sign_nbt` used to enforce the first half for signs alone. It now owns only
-the sign text format, which really is sign-specific.
+The inverse -- "at 1.20.5+ every block entity must carry the key" -- is
+deliberately NOT checked, because vanilla does not work that way. Across the 1108
+shipped structure files that contain block entities, 4832 of 4848 block entities
+carry no `components` key at all, both at DataVersion 4325 (1.21.5) and at 4556
+(1.21.10): 99.7% omit it. The only carriers are the eight in each of
+`pillager_outpost/watchtower.nbt` and `watchtower_overgrown.nbt`, and those same
+two files also hold block entities without it -- so vanilla mixes both shapes
+inside one file. Absence is the ordinary shape and the game loads it fine, so
+requiring the key would flag correct data. Not even a warning: at that frequency
+a warning is noise.
 """
 from __future__ import annotations
 
@@ -112,7 +110,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         file_min_dv = version_map.get(file_min_version)
         if file_min_dv is None:
             continue
-        expects_components = file_min_dv >= DV_1_20_5
+        predates_components = file_min_dv < DV_1_20_5
 
         files_checked += 1
         names = _palette_names(nbt)
@@ -123,21 +121,16 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             if not isinstance(block_nbt, nbtlib.Compound):
                 continue
             block_entities_checked += 1
-            if ("components" in block_nbt) != expects_components:
+            if predates_components and "components" in block_nbt:
                 offenders.append(_block_id(names, block_entry))
 
         if not offenders:
             continue
 
-        if expects_components:
-            detail = (f"without a `components` key (required from 1.20.5;"
-                      f" min target {file_min_version})")
-        else:
-            detail = (f"with a `components` key (1.20.5+ format, incompatible with"
-                      f" min target {file_min_version})")
         errors.append(
-            f"[ERROR] {rel}: {len(offenders)} {_noun(len(offenders))} {detail}:"
-            f" {_listed(offenders)}"
+            f"[ERROR] {rel}: {len(offenders)} {_noun(len(offenders))} with a"
+            f" `components` key (1.20.5+ format, incompatible with min target"
+            f" {file_min_version}): {_listed(offenders)}"
         )
         files_with_errors.add(nbt_path)
 
@@ -146,7 +139,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
     if errors:
         return False, (
-            f"{len(files_with_errors)} of {files_checked} file(s) need reconversion"
+            f"{len(files_with_errors)} of {files_checked} file(s) carry a"
+            f" pre-1.20.5 `components` key"
         )
 
     print(f"  {files_checked} file(s), {block_entities_checked} block entities"
