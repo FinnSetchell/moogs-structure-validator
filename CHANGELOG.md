@@ -1,6 +1,6 @@
 # changelog
 
-## v1.10.0 -- 2026-08-27
+## v1.10.0 -- 2026-08-31
 
 ### Fixed
 - **`check_registries` skipped the NBT palette scan entirely on any project without a `loot_table` directory.** The check opened with an early `return True, "skipped (no loot tables)"` and the palette scan sat below it, so a pack shipping structures but no loot tables reported PASS having looked at nothing. The two halves are independent and now run that way: a missing `loot_table` directory skips only the loot-table half, and the check returns early only when neither a loot table nor a structure directory exists.
