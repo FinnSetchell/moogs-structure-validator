@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from utils import replace_vanilla
 from utils.paths import data_dir as _data_dir
 
 if TYPE_CHECKING:
@@ -119,6 +120,54 @@ def _check_set_to_structure(
     return errors
 
 
+def _check_structure_placed(
+    worldgen_structure_dir: Path, data_root: Path, namespace_root: Path, namespace: str
+) -> list[str]:
+    """The reverse of _check_set_to_structure: every structure must be placed by something.
+
+    A `worldgen/structure/*.json` that no `structure_set` names can never generate --
+    nothing ever asks the game to look for it, and the failure is silent. It surfaces
+    only as `could_not_locate` in a runtime sweep.
+
+    Two things count as placing a structure:
+
+      - an entry in any `worldgen/structure_set/*.json`. Every namespace under `data/`
+        is scanned, not just the mod's own, because a pack may override a vanilla set
+        (`data/minecraft/worldgen/structure_set/...`) to slot its structure into it;
+      - being named as a `replacement_structure` in an MSL `replace_vanilla.json`
+        preset. MSL swaps it in for the vanilla structure it replaces, so it generates
+        through that structure's set and needs none of its own.
+    """
+    placed: set[str] = set()
+
+    for set_dir in sorted(data_root.glob("*/worldgen/structure_set")):
+        for json_path in sorted(set_dir.rglob("*.json")):
+            data = _load_json(json_path)
+            if data is None:
+                continue
+            for entry in data.get("structures", []):
+                loc = entry.get("structure")
+                if isinstance(loc, str) and loc:
+                    placed.add(loc if ":" in loc else f"minecraft:{loc}")
+
+    manifest = replace_vanilla.load(namespace_root)
+    if manifest is not None:
+        for replacement in manifest.replacements:
+            loc = replacement.replacement_structure
+            if loc:
+                placed.add(loc if ":" in loc else f"minecraft:{loc}")
+
+    errors = []
+    for json_path in sorted(worldgen_structure_dir.rglob("*.json")):
+        rel = json_path.relative_to(worldgen_structure_dir).with_suffix("").as_posix()
+        if f"{namespace}:{rel}" not in placed:
+            errors.append(
+                f"{rel}.json  ->  in no structure_set, and not an MSL"
+                f" replace_vanilla replacement_structure  (can never generate)"
+            )
+    return errors
+
+
 def _check_pool_fallbacks(ctx: ValidatorContext, namespace_root: Path) -> list[str]:
     template_pool_dir = namespace_root / "worldgen" / "template_pool"
     if not template_pool_dir.exists():
@@ -179,57 +228,68 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
     errors = _check_pool_to_nbt(template_pool_dir, structures_dir, ctx.namespace)
     if errors:
-        print(f"  [1/6] Pool -> NBT        {len(errors)} missing:")
+        print(f"  [1/7] Pool -> NBT        {len(errors)} missing:")
         for e in errors:
             print(f"          {e}")
         failed = True
     else:
-        print(f"  [1/6] Pool -> NBT        OK")
+        print(f"  [1/7] Pool -> NBT        OK")
 
     orphans = _check_orphaned_nbt(template_pool_dir, structures_dir, ctx.namespace)
     orphan_count = len(orphans)
     if orphans:
-        print(f"  [2/6] Orphaned NBT       {orphan_count} unreferenced:")
+        print(f"  [2/7] Orphaned NBT       {orphan_count} unreferenced:")
         for o in orphans:
             print(f"          {o}")
     else:
-        print(f"  [2/6] Orphaned NBT       OK")
+        print(f"  [2/7] Orphaned NBT       OK")
 
     errors = _check_structure_to_pool(worldgen_structure_dir, template_pool_dir, ctx.namespace)
     if errors:
-        print(f"  [3/6] Structure -> Pool  {len(errors)} missing:")
+        print(f"  [3/7] Structure -> Pool  {len(errors)} missing:")
         for e in errors:
             print(f"          {e}")
         failed = True
     else:
-        print(f"  [3/6] Structure -> Pool  OK")
+        print(f"  [3/7] Structure -> Pool  OK")
 
     errors = _check_set_to_structure(structure_set_dir, worldgen_structure_dir, ctx.namespace)
     if errors:
-        print(f"  [4/6] Set -> Structure   {len(errors)} missing:")
+        print(f"  [4/7] Set -> Structure   {len(errors)} missing:")
         for e in errors:
             print(f"          {e}")
         failed = True
     else:
-        print(f"  [4/6] Set -> Structure   OK")
+        print(f"  [4/7] Set -> Structure   OK")
+
+    errors = _check_structure_placed(
+        worldgen_structure_dir, namespace_root.parent, namespace_root, ctx.namespace
+    )
+    if errors:
+        print(f"  [5/7] Structure -> Set   {len(errors)} unplaced:")
+        for e in errors:
+            print(f"          {e}")
+        failed = True
+    else:
+        print(f"  [5/7] Structure -> Set   OK")
 
     fallback_errors = _check_pool_fallbacks(ctx, namespace_root)
     if fallback_errors:
-        print(f"  [5/6] Pool fallbacks     {len(fallback_errors)} missing:")
+        print(f"  [6/7] Pool fallbacks     {len(fallback_errors)} missing:")
         for e in fallback_errors:
             print(f"          {e}")
         failed = True
     else:
-        print(f"  [5/6] Pool fallbacks     OK")
+        print(f"  [6/7] Pool fallbacks     OK")
 
     msl_key_errors = _check_msl_element_key(ctx, namespace_root)
     if msl_key_errors:
-        print(f"  [6/6] MSL element keys   {len(msl_key_errors)} bad:")
+        print(f"  [7/7] MSL element keys   {len(msl_key_errors)} bad:")
         for e in msl_key_errors:
             print(e)
         failed = True
     else:
-        print(f"  [6/6] MSL element keys   OK")
+        print(f"  [7/7] MSL element keys   OK")
 
     if failed:
         summary = "cross-reference errors found"

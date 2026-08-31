@@ -28,6 +28,10 @@
 
   The inverse -- "at 1.20.5+ every block entity must carry the key" -- is deliberately **not** checked, because vanilla does not work that way. Surveying the structure files Mojang ships, at DataVersion 4325 (1.21.5) and again at 4556 (1.21.10): of the 4848 block entities across the 1108 files that contain any, **4832 carry no `components` key** -- 99.7%. The only carriers are the eight in each of `pillager_outpost/watchtower.nbt` and `watchtower_overgrown.nbt`, and both of those files also hold block entities without it, so vanilla mixes the two shapes inside one file. Absence is the ordinary shape and the game loads it fine, so requiring the key flags correct data; at that frequency even a warning would be noise.
 
+- **`check_data_integrity` step 5/7, "Structure -> Set"** -- the reverse of the existing set-to-structure check. Every `worldgen/structure/*.json` must be placed by something; one that nothing places can never generate, and the failure is silent -- it surfaces only as `could_not_locate` in a runtime sweep. Found on `MoogsVoyagerStructures-1.21-datapack`, where `dead_tree_spruce`, `desert_well` and `snowy_well` were in no set while the 1.20 branch had all three (since fixed).
+
+  Two things count as placing a structure, and both had to be honoured to avoid false positives: an entry in any `worldgen/structure_set/*.json` -- every namespace under `data/` is scanned, not just the mod's own, since a pack may override a vanilla set to slot its structure in -- and being named as a `replacement_structure` in an MSL `replace_vanilla.json` preset, which generates through the vanilla structure's set and needs none of its own. On `MoogsTemplesReimagined` four of six structures are placed that second way; counting only structure sets would have flagged them all.
+
 - **`check_no_particles`** -- policy check: builds ship no particle-emitting entities. Flags any `minecraft:area_effect_cloud` carrying a particle field, walking riders and spawner-nested entities via `iter_entities`. The field was renamed at 1.21.6, so `Particle` and `custom_particle` are treated identically; this is a policy rule rather than a version-format one and neither spelling is wanted on any version.
 
 ### Changed
@@ -35,7 +39,7 @@
 - `tests/nbt_helpers.stub_registries` also patches `registries.version_probe._fetch_version`, which binds the name at import time and so was left reaching the network when a check annotated an unknown block ID.
 
 ### Tests
-- 23 new fixture tests. Full suite: 184 passed.
+- 23 new fixture tests, plus 43 output-encoding guards and 7 structure-placement tests. Full suite: 234 passed.
 
 ### Impact
 `check_no_particles` is clean across `MoogsSoaringStructures`, `MoogsVoyagerStructures-1.21-datapack` and `MoogsTemplesReimagined-1.21-datapack`.

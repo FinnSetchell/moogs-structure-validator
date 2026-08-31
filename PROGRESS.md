@@ -2,6 +2,7 @@
 - [x] `checks/check_registries.py` -- palette scan no longer sits behind the loot-table early return; the two halves run independently, and the DFU min-version reasoning is stated in the source
 - [x] `checks/check_attribute_ids.py` -- `_ShapeBoundary` table: item attribute modifiers use the 1.20.5 boundary, entity attributes keep 1.21; the 1.21.2 prefix boundary is unchanged for both
 - [x] `checks/check_block_entity_components.py` -- a `components` key on any block entity in a file floored below 1.20.5 is an ERROR, generalising the sign-only rule to every block entity. The "must carry it at 1.20.5+" direction is deliberately absent: vanilla omits the key on 4832 of 4848 block entities in its own structure files and mixes both shapes within a single file, so requiring it flags correct data
+- [x] `checks/check_data_integrity.py` -- new step 5/7 `Structure -> Set`: flags any worldgen structure that no structure_set names and no MSL `replace_vanilla` preset uses as a `replacement_structure`; scans structure_sets in every namespace under `data/`
 - [x] `checks/check_no_particles.py` -- policy: no `minecraft:area_effect_cloud` carrying `Particle` (pre-1.21.6) or `custom_particle` (1.21.6+)
 - [x] `checks/check_sign_nbt.py` -- components-key rule removed; sign text rules kept
 - [x] `tests/nbt_helpers.py` -- `stub_registries` also patches `registries.version_probe._fetch_version`
