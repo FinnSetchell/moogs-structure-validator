@@ -77,7 +77,7 @@ def _check_mob_effects(
         if isinstance(legacy, list) and legacy:
             errors.append(
                 f"[ERROR] {rel}: {entity_path} ({entity_id}) uses legacy `ActiveEffects` on"
-                f" a min≥1.20.2 target ({min_version}); use `active_effects`"
+                f" a min>=1.20.2 target ({min_version}); use `active_effects`"
             )
         if isinstance(new, list):
             for i, eff in enumerate(new):

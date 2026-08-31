@@ -222,7 +222,31 @@ def _emit_json(
     stream.write("\n")
 
 
+def _force_utf8_streams() -> None:
+    """Make stdout/stderr able to carry any character a check prints.
+
+    On Windows, Python uses the console codec for stdout only when attached to a
+    real console; piped or redirected output falls back to the locale encoding
+    (cp1252 here), whose `surrogateescape` handler does not rescue a character
+    that simply has no cp1252 mapping. A single such character in a message then
+    raises UnicodeEncodeError inside the check, which `run_checks` catches and
+    reports as `[crashed]` -- losing the real finding and failing the run.
+    Messages are kept ASCII-safe as well (see tests/test_output_encoding.py);
+    this is the second line of defence.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue  # replaced by a capture object (pytest) or a plain file-like
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
 def main() -> None:
+    _force_utf8_streams()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--project-root", required=True, type=Path)

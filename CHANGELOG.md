@@ -17,6 +17,12 @@
 
   Verified on `MoogsTemplesReimagined`, which ships the same processor lists on both a 1.20 and a 1.21 branch: the 1.20 branch dropped exactly `generic.armor`, `generic.attack_damage`, `generic.max_health` and `generic.movement_speed`, the 1.21 branch was unchanged, and both branches now collect an identical set of block IDs. No true positive is lost.
 
+- **A `>=` sign in a check's own error message crashed that check on Windows.** Seven error strings across five checks contained U+2265. Python only uses the console codec for `stdout` when attached to a real console; piped or redirected output falls back to the locale encoding (cp1252 on a UK/US Windows box), and its `surrogateescape` handler does not rescue a character that has no cp1252 mapping at all. Printing one raised `UnicodeEncodeError` *inside* the check, which `run_checks` caught and reported as `[crashed]`, so the run failed with `crashed with exception` and the actual finding was never shown. It bit exactly when output was redirected -- `> log.txt`, a pipe, or a Windows CI runner capturing output.
+
+  Two independent guards now. `main()` calls `_force_utf8_streams()`, which reconfigures `stdout`/`stderr` to UTF-8 with `errors="replace"` (skipped harmlessly when the stream is a capture object with no `reconfigure`). And the messages are ASCII again: U+2265 -> `>=`, U+2192 -> `->`. `tests/test_output_encoding.py` parametrises over every source file in `checks/`, `utils/` and `validator.py` and fails on any string literal that cp1252 cannot encode, so this cannot creep back.
+
+  `--json` runs were never affected: human output goes to `stderr`, which defaults to `errors="backslashreplace"` and rendered it as a printable backslash escape sequence instead of raising.
+
 ### Added
 - **`check_block_entity_components`** -- the `components` key on a block entity arrived at 1.20.5, and each per-version variant is emitted by that era's own game writer, so the rule is symmetric and both halves are errors, keyed on the file's minimum covered version:
 

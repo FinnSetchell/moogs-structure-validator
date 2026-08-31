@@ -23,9 +23,9 @@ class Boundary:
 
 
 BOUNDARIES: dict[str, Boundary] = {
-    "1.20.2": Boundary("mob-effect", DV_1_20_2, "1.20.2", "ActiveEffects/PascalCase → active_effects/snake_case"),
-    "1.20.5": Boundary("item-format", DV_1_20_5, "1.20.5", "Count/tag → count/components (item stacks)"),
-    "1.21":   Boundary("attributes", DV_1_21, "1.21", "Attributes → attributes (list-of-maps -> namespaced ids)"),
+    "1.20.2": Boundary("mob-effect", DV_1_20_2, "1.20.2", "ActiveEffects/PascalCase -> active_effects/snake_case"),
+    "1.20.5": Boundary("item-format", DV_1_20_5, "1.20.5", "Count/tag -> count/components (item stacks)"),
+    "1.21":   Boundary("attributes", DV_1_21, "1.21", "Attributes -> attributes (list-of-maps -> namespaced ids)"),
     "1.21.2": Boundary("attribute-prefix", DV_1_21_2, "1.21.2", "attribute ids lose generic./player./zombie. prefixes"),
     "1.21.5": Boundary("equipment-and-text", DV_1_21_5, "1.21.5", "equipment/drop_chances map; text SNBT; enchantments unwrapped"),
 }

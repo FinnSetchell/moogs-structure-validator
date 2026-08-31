@@ -103,7 +103,7 @@ def _check_book_item(
 
     if fmt_side == BoundarySide.NEW and has_tag:
         errors.append(
-            f"[ERROR] {rel}: {path} ({item_id}) uses legacy `tag` on a min≥1.20.5 target"
+            f"[ERROR] {rel}: {path} ({item_id}) uses legacy `tag` on a min>=1.20.5 target"
             f" ({min_version}); books must live in `components.minecraft:{item_id.rsplit(':',1)[1]}_content`"
         )
     elif fmt_side == BoundarySide.OLD and has_components:
@@ -141,7 +141,7 @@ def _check_book_item(
                 page_is_json = _is_json_object_string(unwrapped)
                 if page_side == BoundarySide.NEW and page_is_json:
                     errors.append(
-                        f"[ERROR] {rel}: {pages_path}[{i}]: JSON-string page on a min≥1.21.5"
+                        f"[ERROR] {rel}: {pages_path}[{i}]: JSON-string page on a min>=1.21.5"
                         f" target ({min_version}); at 1.21.5+ pages are SNBT compounds or bare"
                         f" strings, so this renders literally in game"
                     )

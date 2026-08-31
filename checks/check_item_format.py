@@ -58,7 +58,7 @@ def _check_enchantments(
         if isinstance(ench_list, list) and ench_list:
             if fmt_side == BoundarySide.NEW:
                 errors.append(
-                    f"[ERROR] {rel}: {path}.tag.Enchantments used on min≥1.20.5 target"
+                    f"[ERROR] {rel}: {path}.tag.Enchantments used on min>=1.20.5 target"
                     f" ({min_v}); enchantments must live under components at 1.20.5+"
                 )
             elif valid_enchants is not None:
@@ -82,7 +82,7 @@ def _check_enchantments(
             has_levels = "levels" in ench
             if wrap_side == BoundarySide.NEW and has_levels:
                 errors.append(
-                    f"[ERROR] {rel}: {path}.components.{key}: `levels` wrapper on min≥1.21.5"
+                    f"[ERROR] {rel}: {path}.components.{key}: `levels` wrapper on min>=1.21.5"
                     f" target ({min_v}); at 1.21.5+ enchantments are inlined ({{id: lvl, ...}})"
                 )
             elif wrap_side == BoundarySide.OLD and not has_levels:

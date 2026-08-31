@@ -43,7 +43,7 @@ def _flag_value(
         if _is_json_obj_or_array(value):
             if side == BoundarySide.NEW:
                 errors.append(
-                    f"[ERROR] {rel}: {path}: JSON-string text component on a min≥1.21.5 target"
+                    f"[ERROR] {rel}: {path}: JSON-string text component on a min>=1.21.5 target"
                     f" ({min_version}); at 1.21.5+ text is inline SNBT/bare string,"
                     f" JSON strings render literally"
                 )

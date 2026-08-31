@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from validator import ValidatorContext
 
 # Keys that were absorbed into the unified `equipment` / `drop_chances` compounds at 1.21.5.
-# Presence of any of these on a min ≥ 1.21.5 target = silently-dropped equipment in-game.
+# Presence of any of these on a min >= 1.21.5 target = silently-dropped equipment in-game.
 _PRE_1_21_5_KEYS = frozenset({
     "ArmorItems",
     "HandItems",
@@ -149,7 +149,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                     if key in entity_nbt:
                         errors.append(
                             f"[ERROR] {rel}: {path} (entity {entity_id!r}) has legacy key"
-                            f" `{key}` on a min≥1.21.5 target ({min_version}, DV {min_dv});"
+                            f" `{key}` on a min>=1.21.5 target ({min_version}, DV {min_dv});"
                             f" this equipment is silently dropped at 1.21.5+"
                         )
             elif side == BoundarySide.OLD:
