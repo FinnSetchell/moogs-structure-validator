@@ -1,3 +1,6 @@
+## v1.10.2 fixes (2026-09-02)
+- [x] `checks/check_worldgen_schemas.py` -- `y_allowance` with `max_y_allowed` and no `min_y_allowed` is an ERROR on the generic jigsaw type; MSL unwraps `minYAllowed` inside a branch guarded only on `maxYAllowed`, crashing chunkgen. `min`-only and the nether type are unaffected
+
 ## v1.10.1 fixes (2026-08-31)
 - [x] `checks/check_book_contents.py` -- the 1.21.5 SPANS branch now requires `page_is_json` (it computed the flag then ignored it, failing plain-text pages); page-encoding checks restricted to `written_book`, since `writable_book_content` pages are plain strings on every version
 

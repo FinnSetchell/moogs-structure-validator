@@ -90,6 +90,38 @@ def test_y_allowance_valid_passes(tmp_path):
     assert passed
 
 
+def test_y_allowance_max_without_min_fails(tmp_path):
+    """MSL guards this branch on maxYAllowed and then unwraps minYAllowed inside it,
+    so a max with no min throws during chunk generation."""
+    data = _generic_structure(y_allowance={"max_y_allowed": 41})
+    _write(tmp_path, "test", "structure", "s.json", data)
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_y_allowance_min_without_max_passes(tmp_path):
+    """The mirrored branch guards minYAllowed correctly, so a min with no max is fine.
+    MoogsEndStructures ships 25 structures shaped this way without incident."""
+    data = _generic_structure(y_allowance={"min_y_allowed": 45})
+    _write(tmp_path, "test", "structure", "s.json", data)
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
+def test_nether_y_allowance_max_without_min_passes(tmp_path):
+    """The nether type overrides postLayoutAdjustments and never reaches the crashing
+    code, so the same shape is safe there."""
+    data = _generic_structure(
+        type="moogs_structures:moogs_structures_generic_nether_jigsaw_structure",
+        land_search_direction="FIXED_HEIGHT",
+        ledge_offset_y=10,
+        y_allowance={"max_y_allowed": 35},
+    )
+    _write(tmp_path, "test", "structure", "s.json", data)
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
 def test_versioned_element_without_locations_fails(tmp_path):
     element = {
         "element_type": "moogs_structures:versioned_single_pool_element",

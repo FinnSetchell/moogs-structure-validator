@@ -25,6 +25,11 @@ _SUBDIRS: list[tuple[str, str]] = [
 
 _MSL_PREFIX = "moogs_structures:"
 
+# GenericJigsawStructure.offsetToNewHeight unwraps minYAllowed inside a branch guarded
+# only on maxYAllowed, so this type crashes chunkgen when a y_allowance has a max and no
+# min. The nether type overrides that code path and is not affected.
+_CRASHING_Y_ALLOWANCE_TYPE = "moogs_structures:moogs_structures_generic_jigsaw_structure"
+
 # MSL type-specific schemas, dispatched on the "type" / "element_type" value.
 _MSL_STRUCTURE_SCHEMAS: dict[str, str] = {
     "moogs_structures:moogs_structures_generic_jigsaw_structure": "msl_generic_jigsaw_structure.json",
@@ -229,6 +234,21 @@ def _check_msl_types(subdir: str, rel, data: dict, dv_range) -> int:
                     if isinstance(min_y, int) and isinstance(max_y, int) and max_y < min_y:
                         print(f"  [{subdir}] {rel} @ y_allowance")
                         print(f"    max_y_allowed {max_y} is less than min_y_allowed {min_y}")
+                        errors += 1
+                    # A max with no min is a hard chunkgen crash, not a config nicety.
+                    # GenericJigsawStructure.offsetToNewHeight guards the branch on
+                    # maxYAllowed.isPresent() and then calls minYAllowed.get() inside it,
+                    # so the Optional is unwrapped empty and throws NoSuchElementException
+                    # the first time worldgen tries to place the structure. The branch
+                    # below it guards minYAllowed correctly, which is why a min with no
+                    # max is fine. The nether subclass overrides postLayoutAdjustments
+                    # and never reaches offsetToNewHeight, so it is unaffected.
+                    elif max_y is not None and min_y is None and stype == _CRASHING_Y_ALLOWANCE_TYPE:
+                        print(f"  [{subdir}] {rel} @ y_allowance")
+                        print(f"    max_y_allowed {max_y} is set with no min_y_allowed;"
+                              f" this crashes chunk generation")
+                        print(f"    add min_y_allowed (the dimension floor, e.g. -64,"
+                              f" preserves current behaviour)")
                         errors += 1
 
     elif subdir == "template_pool":

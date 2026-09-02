@@ -1,5 +1,14 @@
 # changelog
 
+## v1.10.2 -- 2026-09-02
+
+### Fixed
+- **`check_worldgen_schemas` let through a `y_allowance` that crashes chunk generation.** A structure whose `y_allowance` sets `max_y_allowed` with no `min_y_allowed` kills the server thread the first time worldgen tries to place it. The existing inverted-range check needed *both* fields to be integers before it compared them, so a one-sided block passed, and the JSON schema marks both properties optional -- nothing caught it.
+
+  In MSL, `GenericJigsawStructure.offsetToNewHeight` guards the branch on `maxYAllowed.isPresent()` and then calls `minYAllowed.get()` inside it, unwrapping an empty Optional: `java.util.NoSuchElementException: No value present`. It is deterministic, not intermittent. The mirrored branch below guards `minYAllowed` correctly, which is why a `min` with no `max` is harmless -- MoogsEndStructures ships 25 structures shaped that way. The nether type overrides `postLayoutAdjustments` and never reaches the faulty code, so it is exempt too.
+
+  The check therefore fires on exactly one shape: `max_y_allowed` present, `min_y_allowed` absent, on `moogs_structures_generic_jigsaw_structure`. It shipped in Moog's Voyager Structures 5.1.0 and Moog's Temples Reimagined 2.0.1.
+
 ## v1.10.1 -- 2026-08-31
 
 ### Fixed
