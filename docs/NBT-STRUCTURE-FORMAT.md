@@ -154,7 +154,8 @@ mcmeta wins.
 `misode/deepslate` is a TypeScript library that reads structure NBT for
 rendering and editing. It is cited in this doc only as a reference
 implementation for parser behaviour. It is not a runtime dependency of
-this validator (which is Python and uses `nbtlib` for binary parsing) and
+this validator (which is Python and parses NBT with its own `core/nbt.py`,
+keeping `nbtlib` only as the fallback for files that parser rejects) and
 should not become one. See section 16 for the rationale.
 
 Citation tags used elsewhere in this doc:
@@ -671,10 +672,11 @@ references the implementer should follow.
    NBT must exist in the earliest Minecraft version that the structure
    can be loaded into. This is stricter than the current
    `check_registries.py` union-of-IDs approach. The earliest version
-   per NBT is already computed by `utils/nbt_versions.py` in
-   `_build_nbt_min_versions`, which walks template pools (including the
+   per NBT is already computed by `core/ranges.py` in
+   `build_nbt_version_ranges`, which walks template pools (including the
    `moogs_structures:versioned_single_pool_element` `locations` map) and
-   produces a `dict[Path, str]` of NBT path to lowest-allowed version.
+   produces a `dict[Path, NBTVersionInfo]` of NBT path to (lowest, highest)
+   target version.
    The validator should:
    * Consume that map.
    * For each NBT, fetch the matching mcmeta tag at the lowest version
@@ -710,7 +712,8 @@ data pack uses the right folder names for `mc_versions`: singular for 1.21+
 `mc_versions` spans the 1.21 boundary. Covers section 2 of this doc.
 
 `nbt_check` (`checks/nbt_check.py`). Loads every `.nbt` under the structures
-folder via `nbtlib.load`. Reports files that fail to parse. Covers section 2
+folder via `core/nbt.py` (falling back to `nbtlib` for anything it rejects).
+Reports files that fail to parse. Covers section 2
 "file is gzipped NBT" plus generic "top-level tag is a Compound".
 
 `check_data_integrity` (`checks/check_data_integrity.py`). Cross references
@@ -731,11 +734,10 @@ Out of scope for this doc.
 `check_registries` (`checks/check_registries.py`). Already mcmeta-led. Pulls
 each version's flat ID list via
 `https://raw.githubusercontent.com/misode/mcmeta/{version}-summary/registries/data.json`
-(`registries/fetcher.py`). Validates loot-table item and block IDs against
-the union across `mc_versions`, then validates every `.nbt` palette `Name`
-against the per-NBT lowest version (uses `utils/nbt_versions.py` for the
-mapping). Annotates unknown blocks with `find_version_added` from
-`registries/version_probe.py`. This module already implements section 14
+(`core/mcmeta.py`). Validates loot-table item and block IDs against
+the lowest targeted version, then validates every `.nbt` palette `Name`
+against the per-NBT lowest version (uses `core/ranges.py` for the
+mapping). Annotates unknown blocks with `Mcmeta.version_added`. This module already implements section 14
 item 4 for IDs; the new format reference adds property-level validation on
 top.
 
@@ -768,16 +770,15 @@ informational.
 
 Supporting modules:
 
-* `registries/fetcher.py`. Fetches `<version>-summary/registries/data.json`
-  per version and unions the item / block / entity ID sets. Cache-aware.
-* `registries/version_probe.py`. Walks a hardcoded `PROBE_VERSIONS` list to
-  find the first version a given block ID appears in. Used for annotating
-  unknown-block diagnostics.
-* `utils/nbt_versions.py`. Builds the per-NBT minimum-version map from
+* `core/mcmeta.py`. Fetches `<version>-summary/registries/data.json` per
+  version (every registry, cached per version) and the version index;
+  `version_added` walks every stable release newer than a given one to find
+  the first that has an id, for annotating unknown-block diagnostics.
+* `core/ranges.py`. Builds the per-NBT `(min, max)` target-version map from
   template pools (including `versioned_single_pool_element` `locations`).
-  Already exists; section 14 item 4 builds on this.
-* `utils/paths.py`. Resolves the data pack folder name (`structure` vs
-  `structures`) given the project's `mc_versions`.
+  Section 14 item 4 builds on this.
+* `core/project.py`. Resolves the data pack folder name (`structure` vs
+  `structures`) and reads every JSON file once.
 
 Cache and configuration:
 
@@ -813,7 +814,8 @@ What this format reference adds on top of what is already in `checks/`:
 Drop deepslate from the validation plan. Concretely:
 
 * deepslate is not currently a runtime dependency (this validator is Python
-  + `nbtlib`). It should not become one.
+  with its own parser in `core/nbt.py`, plus `nbtlib` as a fallback). It
+  should not become one.
 * Every check deepslate's `Structure.fromNbt` performs is reproducible with
   raw `nbtlib` parsing plus mcmeta data:
   * "Block outside size bounds" -> check `blocks[i].pos` against `size`
@@ -824,7 +826,7 @@ Drop deepslate from the validation plan. Concretely:
     `check_registries`).
   * "Palette `Properties` valid" -> check against
     `<version>-summary/blocks/data.min.json` (new check).
-  * "NBT file is parseable" -> `nbtlib.load` already does this in
+  * "NBT file is parseable" -> `core/nbt.py` already does this in
     `nbt_check`.
 * The only nontrivial deepslate-only logic is `BlockState.parse`, which
   parses a block-state string like

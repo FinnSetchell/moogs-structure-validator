@@ -1,5 +1,28 @@
 # changelog
 
+## v1.11.0 -- 2026-09-12
+
+### Changed
+- **The validator's internals are rebuilt.** Same inputs, same 29 checks, same output -- verified byte-for-byte against the previous release across all twenty mod projects in the portfolio (both datapack lines of every mod, plus the templates) -- but everything underneath is new:
+
+  - *One parser, built for structure files.* `core/nbt.py` reads the NBT bytes directly and keeps plain blocks in two flat int arrays; only block entities, entities and the palette become Python objects. It reads every file in Moog's Voyager Structures in 1.6s where the general-purpose library took 23s, and produces exactly the same tree on all 355 of them (checked key by key). The library stays as the fallback: a file the new parser rejects goes to it, and its verdict is the one reported.
+  - *Everything shared is read once.* Structure files, their indexes (block entities, every entity including riders and spawner-nested ones, blocks by palette index), template pools and other JSON, registry files, the version index: each is read once per run and handed to every check, instead of each check re-reading and re-walking it. Where a check touched 1.27 million block entries to find a handful of containers, it now asks the index.
+  - *Registries and versions come from one place.* `core/mcmeta.py` is the only code that talks to misode/mcmeta, with one disk cache and one in-process cache; the version index it returns knows every stable release, so nothing about a new Minecraft version is hard-coded anywhere.
+
+  Measured on `MoogsVoyagerStructures-1.21-datapack`, best of three, in-process: the check phase went from 48.2s to 2.2s (21x). Whole runs across the portfolio that took 45-130s now take 1-7s.
+
+- **Every check writes the same words on every run.** Two checks iterated a set of key names and reported the first hit; Python randomises set order per process, so the named key changed between identical runs (`ArmorItems` one run, `HandItems` the next). Those keys are now iterated in a fixed order.
+
+### Added
+- **`check_jigsaw_pools` verifies vanilla pools.** A jigsaw block whose `pool` is `minecraft:...` used to be taken on trust; it is now checked against mcmeta's `worldgen/template_pool` registry for the targeted versions, and a pool vanilla does not have warns (warn-only, as the check always was). When the registry cannot be fetched, vanilla pools are taken as valid as before.
+- **`check_msl_replace_vanilla` knows every vanilla structure.** The set a preset may replace comes from mcmeta's `worldgen/structure` registry across the targeted versions, with the previous hand-kept list as the offline fallback.
+- **`check_registries` probes every release.** The `added in X` note on an unknown block used to walk a fixed list starting at 1.21, so a block added in 1.20.3 was reported as "added in 1.21". It now walks every stable release newer than the version the block failed at, straight from the version index.
+- **`check_registries` scans multi-variant palettes.** A file using `palettes` (the form vanilla shipwrecks use) had no `palette` key and was skipped by the palette scan; every variant is now checked.
+- A test suite for the parser (`tests/test_nbt_parser.py`), and a guard that the named DataVersion boundaries match the version index.
+
+### Removed
+- `requests` from `requirements.txt`; nothing imported it.
+
 ## v1.10.2 -- 2026-09-02
 
 ### Fixed

@@ -1,3 +1,11 @@
+## v1.11.0 (2026-09-12)
+- [x] `core/` -- new runtime shared by every check: `project.py` (layout, listings and JSON read once), `nbt.py` (structure parser + per-file index), `structures.py` (files parsed once), `mcmeta.py` (registries, version index, biome tags; one fetch seam), `mcversions.py` (versions, boundaries, `VersionIndex`), `ranges.py` (pool-derived target ranges), `items.py`, `loot.py`, `ids.py`, `replace_vanilla.py`, `context.py` (`ValidatorContext` + `services(ctx)`)
+- [x] every check rewritten on `core`; `utils/` and `registries/` removed; `registries/entity_nbt_keys.json` -> `data/entity_nbt_keys.json`
+- [x] parser proven against nbtlib on all 355 MVS files (identical trees; 14x faster); full output byte-identical to v1.10.2 on all 20 projects
+- [x] check phase 48.2s -> 2.2s on MVS 1.21-datapack; deterministic output (sorted key iteration)
+- [x] `check_jigsaw_pools` verifies `minecraft:` pools against mcmeta; `check_msl_replace_vanilla` takes the vanilla structure list from mcmeta; `check_registries` "added in" probes every stable release and scans `palettes` files
+- [x] tests: harness patches the two `core.mcmeta` fetch seams; `tests/test_nbt_parser.py`; boundary constants checked against the version index
+
 ## v1.10.2 fixes (2026-09-02)
 - [x] `checks/check_worldgen_schemas.py` -- `y_allowance` with `max_y_allowed` and no `min_y_allowed` is an ERROR on the generic jigsaw type; MSL unwraps `minYAllowed` inside a branch guarded only on `maxYAllowed`, crashing chunkgen. `min`-only and the nether type are unaffected
 
