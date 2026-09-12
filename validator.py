@@ -1,47 +1,74 @@
+"""Validate a Minecraft structure mod's data pack before release.
+
+Usage::
+
+    python validator.py --config <project>/validator.json --project-root <project>
+
+Exits 0 when every check passes and 1 otherwise. ``--json`` writes a
+machine-readable report (schema_version 1) alongside the human output.
+"""
+from __future__ import annotations
+
 import argparse
 import contextlib
+import importlib
 import io
 import json
 import sys
 import traceback
-from dataclasses import dataclass, field
 from pathlib import Path
 
-from registries.fetcher import fetch_registries
+from core.context import ValidatorContext, services
 
 _W = 70
 
-
-@dataclass
-class ValidatorContext:
-    namespace: str
-    mc_versions: list[str]
-    extra_ids_raw: list[str]
-    project_root: Path
-    refresh: bool
-    extra_ids: set[str] = field(default_factory=set)
-    valid_blocks: set[str] = field(default_factory=set)
-    valid_items: set[str] = field(default_factory=set)
-    valid_entities: set[str] = field(default_factory=set)
-    orphan_nbts: set[Path] = field(default_factory=set)
-    nbt_cache: dict = field(default_factory=dict)
+# Run order. The first column is the name used with --check / --skip-check.
+CHECK_NAMES = [
+    "check_directory_names",
+    "nbt_check",
+    "check_data_integrity",
+    "check_version_coverage",
+    "check_loot_tables",
+    "check_loot_table_schemas",
+    "check_registries",
+    "check_worldgen_schemas",
+    "check_entity_nbt",
+    "check_sign_nbt",
+    "check_block_entity_components",
+    "check_text_components",
+    "check_biome_tags",
+    "check_containers",
+    "check_jigsaw_pools",
+    "check_processor_rules",
+    "check_spawn_counts",
+    "check_msl_structure_tags",
+    "check_msl_replace_vanilla",
+    "check_msl_placements_and_processors",
+    "check_item_format",
+    "check_book_contents",
+    "check_potion_effects",
+    "check_entity_equipment_shape",
+    "check_attribute_ids",
+    "check_entity_nbt_keys",
+    "check_no_spawn_eggs",
+    "check_no_enchanted_books",
+    "check_no_particles",
+]
 
 
 def resolve_extra_ids(raw: list[str], project_root: Path) -> set[str]:
     result: set[str] = set()
     for entry in raw:
         if entry.startswith("@"):
-            ref_path = project_root / entry[1:]
-            with ref_path.open() as f:
-                ids = json.load(f)
-            result.update(ids)
+            with (project_root / entry[1:]).open(encoding="utf-8-sig") as f:
+                result.update(json.load(f))
         else:
             result.add(entry)
     return result
 
 
 def load_config(config_path: Path) -> dict:
-    with config_path.open() as f:
+    with config_path.open(encoding="utf-8-sig") as f:
         cfg = json.load(f)
     if not isinstance(cfg.get("namespace"), str):
         raise ValueError("config missing required string field 'namespace'")
@@ -56,6 +83,8 @@ def _banner(title: str) -> None:
 
 
 def _strip_bom_files(project_root: Path) -> int:
+    """Remove a UTF-8 BOM from every JSON file under ``data/``: the game's
+    parser rejects it, and the count is reported so the fix is visible."""
     data_root = project_root / "src" / "main" / "resources" / "data"
     if not data_root.exists():
         return 0
@@ -67,74 +96,14 @@ def _strip_bom_files(project_root: Path) -> int:
             fixed += 1
     return fixed
 
-def _check_modules():
-    import checks.check_directory_names as check_directory_names
-    import checks.nbt_check as nbt_check
-    import checks.check_data_integrity as check_data_integrity
-    import checks.check_loot_tables as check_loot_tables
-    import checks.check_loot_table_schemas as check_loot_table_schemas
-    import checks.check_registries as check_registries
-    import checks.check_worldgen_schemas as check_worldgen_schemas
-    import checks.check_entity_nbt as check_entity_nbt
-    import checks.check_sign_nbt as check_sign_nbt
-    import checks.check_block_entity_components as check_block_entity_components
-    import checks.check_biome_tags as check_biome_tags
-    import checks.check_containers as check_containers
-    import checks.check_jigsaw_pools as check_jigsaw_pools
-    import checks.check_processor_rules as check_processor_rules
-    import checks.check_item_format as check_item_format
-    import checks.check_entity_equipment_shape as check_entity_equipment_shape
-    import checks.check_entity_nbt_keys as check_entity_nbt_keys
-    import checks.check_no_spawn_eggs as check_no_spawn_eggs
-    import checks.check_no_enchanted_books as check_no_enchanted_books
-    import checks.check_no_particles as check_no_particles
-    import checks.check_version_coverage as check_version_coverage
-    import checks.check_book_contents as check_book_contents
-    import checks.check_text_components as check_text_components
-    import checks.check_attribute_ids as check_attribute_ids
-    import checks.check_potion_effects as check_potion_effects
-    import checks.check_spawn_counts as check_spawn_counts
-    import checks.check_msl_structure_tags as check_msl_structure_tags
-    import checks.check_msl_replace_vanilla as check_msl_replace_vanilla
-    import checks.check_msl_placements_and_processors as check_msl_placements_and_processors
 
-    return [
-        ("check_directory_names", check_directory_names),
-        ("nbt_check", nbt_check),
-        ("check_data_integrity", check_data_integrity),
-        ("check_version_coverage", check_version_coverage),
-        ("check_loot_tables", check_loot_tables),
-        ("check_loot_table_schemas", check_loot_table_schemas),
-        ("check_registries", check_registries),
-        ("check_worldgen_schemas", check_worldgen_schemas),
-        ("check_entity_nbt", check_entity_nbt),
-        ("check_sign_nbt", check_sign_nbt),
-        ("check_block_entity_components", check_block_entity_components),
-        ("check_text_components", check_text_components),
-        ("check_biome_tags", check_biome_tags),
-        ("check_containers", check_containers),
-        ("check_jigsaw_pools", check_jigsaw_pools),
-        ("check_processor_rules", check_processor_rules),
-        ("check_spawn_counts", check_spawn_counts),
-        ("check_msl_structure_tags", check_msl_structure_tags),
-        ("check_msl_replace_vanilla", check_msl_replace_vanilla),
-        ("check_msl_placements_and_processors", check_msl_placements_and_processors),
-        ("check_item_format", check_item_format),
-        ("check_book_contents", check_book_contents),
-        ("check_potion_effects", check_potion_effects),
-        ("check_entity_equipment_shape", check_entity_equipment_shape),
-        ("check_attribute_ids", check_attribute_ids),
-        ("check_entity_nbt_keys", check_entity_nbt_keys),
-        ("check_no_spawn_eggs", check_no_spawn_eggs),
-        ("check_no_enchanted_books", check_no_enchanted_books),
-        ("check_no_particles", check_no_particles),
-    ]
+def _check_modules() -> list[tuple[str, object]]:
+    return [(name, importlib.import_module(f"checks.{name}")) for name in CHECK_NAMES]
 
 
 def _filter_modules(modules, only: list[str] | None, skip: list[str] | None):
     names = [n for n, _ in modules]
-    requested = (only or []) + (skip or [])
-    unknown = [n for n in requested if n not in names]
+    unknown = [n for n in (only or []) + (skip or []) if n not in names]
     if unknown:
         raise SystemExit(
             f"unknown check name(s): {', '.join(unknown)}\n"
@@ -146,30 +115,6 @@ def _filter_modules(modules, only: list[str] | None, skip: list[str] | None):
     if skip:
         result = [(n, m) for n, m in result if n not in skip]
     return result
-
-
-def run_checks(
-    ctx: ValidatorContext,
-    only: list[str] | None = None,
-    skip: list[str] | None = None,
-) -> list[tuple[str, bool, str, str]]:
-    check_modules = _filter_modules(_check_modules(), only, skip)
-
-    results: list[tuple[str, bool, str, str]] = []
-    for name, module in check_modules:
-        _banner(name)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(_TeeStream(sys.stdout, buf)):
-            try:
-                passed, summary = module.run(ctx)
-            except Exception:
-                print("  [crashed]")
-                traceback.print_exc()
-                passed, summary = False, "crashed with exception"
-            print(f"  {'PASS' if passed else 'FAIL'}")
-        results.append((name, passed, summary, buf.getvalue()))
-
-    return results
 
 
 class _TeeStream:
@@ -186,14 +131,34 @@ class _TeeStream:
             s.flush()
 
 
+def run_checks(
+    ctx: ValidatorContext,
+    only: list[str] | None = None,
+    skip: list[str] | None = None,
+) -> list[tuple[str, bool, str, str]]:
+    results: list[tuple[str, bool, str, str]] = []
+    for name, module in _filter_modules(_check_modules(), only, skip):
+        _banner(name)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(_TeeStream(sys.stdout, buf)):
+            try:
+                passed, summary = module.run(ctx)
+            except Exception:
+                print("  [crashed]")
+                traceback.print_exc()
+                passed, summary = False, "crashed with exception"
+            print(f"  {'PASS' if passed else 'FAIL'}")
+        results.append((name, passed, summary, buf.getvalue()))
+    return results
+
+
 def _print_summary(results: list[tuple[str, bool, str, str]]) -> None:
     print(f"\n{'=' * _W}")
     print("  SUMMARY")
     print("=" * _W)
     name_w = max(len(n) for n, _, _, _ in results) + 2
     for name, passed, summary, _ in results:
-        status = "PASS" if passed else "FAIL"
-        print(f"  {status}  {name:<{name_w}} {summary}")
+        print(f"  {'PASS' if passed else 'FAIL'}  {name:<{name_w}} {summary}")
     n_passed = sum(1 for _, p, _, _ in results if p)
     n_failed = len(results) - n_passed
     parts = []
@@ -205,9 +170,7 @@ def _print_summary(results: list[tuple[str, bool, str, str]]) -> None:
     print("=" * _W)
 
 
-def _emit_json(
-    ctx: ValidatorContext, results: list[tuple[str, bool, str, str]], stream
-) -> None:
+def _emit_json(ctx: ValidatorContext, results: list[tuple[str, bool, str, str]], stream) -> None:
     payload = {
         "schema_version": 1,
         "namespace": ctx.namespace,
@@ -225,19 +188,16 @@ def _emit_json(
 def _force_utf8_streams() -> None:
     """Make stdout/stderr able to carry any character a check prints.
 
-    On Windows, Python uses the console codec for stdout only when attached to a
-    real console; piped or redirected output falls back to the locale encoding
-    (cp1252 here), whose `surrogateescape` handler does not rescue a character
-    that simply has no cp1252 mapping. A single such character in a message then
-    raises UnicodeEncodeError inside the check, which `run_checks` catches and
-    reports as `[crashed]` -- losing the real finding and failing the run.
-    Messages are kept ASCII-safe as well (see tests/test_output_encoding.py);
-    this is the second line of defence.
+    On Windows, redirected output falls back to the locale encoding (cp1252),
+    whose ``surrogateescape`` handler cannot rescue a character with no cp1252
+    mapping; one such character in a message would raise inside the check and
+    turn a finding into ``[crashed]``. Messages are kept ASCII-safe as well
+    (tests/test_output_encoding.py); this is the second line of defence.
     """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is None:
-            continue  # replaced by a capture object (pytest) or a plain file-like
+            continue  # a capture object (pytest) or a plain file-like
         try:
             reconfigure(encoding="utf-8", errors="replace")
         except (ValueError, OSError):
@@ -250,37 +210,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--project-root", required=True, type=Path)
-    parser.add_argument("--refresh", action="store_true")
-    parser.add_argument(
-        "--check",
-        action="append",
-        default=[],
-        metavar="NAME",
-        help="run only the named check (may be repeated)",
-    )
-    parser.add_argument(
-        "--skip-check",
-        action="append",
-        default=[],
-        metavar="NAME",
-        help="skip the named check (may be repeated)",
-    )
-    parser.add_argument(
-        "--json",
-        dest="json_out",
-        nargs="?",
-        const="-",
-        default=None,
-        metavar="PATH",
-        help="emit machine-readable JSON report (path or - for stdout)",
-    )
+    parser.add_argument("--refresh", action="store_true", help="re-fetch cached registries and schemas")
+    parser.add_argument("--check", action="append", default=[], metavar="NAME",
+                        help="run only the named check (may be repeated)")
+    parser.add_argument("--skip-check", action="append", default=[], metavar="NAME",
+                        help="skip the named check (may be repeated)")
+    parser.add_argument("--json", dest="json_out", nargs="?", const="-", default=None, metavar="PATH",
+                        help="emit machine-readable JSON report (path or - for stdout)")
     args = parser.parse_args()
 
     json_mode = args.json_out is not None
-    human_stream = sys.stderr if json_mode else sys.stdout
     real_stdout = sys.stdout
     if json_mode:
-        sys.stdout = human_stream
+        sys.stdout = sys.stderr
 
     cfg = load_config(args.config)
 
@@ -291,33 +233,32 @@ def main() -> None:
         project_root=Path(str(args.project_root).strip('"')),
         refresh=args.refresh,
     )
-
     ctx.extra_ids = resolve_extra_ids(ctx.extra_ids_raw, ctx.project_root)
 
     versions_str = ", ".join(ctx.mc_versions)
     print(f"Project: {ctx.namespace}  (versions: {versions_str})")
 
-    cache_dir = Path(__file__).parent / "cache"
-    cache_dir.mkdir(exist_ok=True)
+    svc = services(ctx)
+    svc.mcmeta.cache_dir.mkdir(exist_ok=True)
 
     print(f"Loading registries ({versions_str})...")
-    ctx.valid_items, ctx.valid_blocks, ctx.valid_entities = fetch_registries(ctx.mc_versions, cache_dir, ctx.refresh)
+    svc.mcmeta.prefetch()
+    ctx.valid_items = svc.mcmeta.union("item")
+    ctx.valid_blocks = svc.mcmeta.union("block")
+    ctx.valid_entities = svc.mcmeta.union("entity_type")
     print(f"  {len(ctx.valid_items)} items, {len(ctx.valid_blocks)} blocks, {len(ctx.valid_entities)} entities")
 
     bom_fixed = _strip_bom_files(ctx.project_root)
     if bom_fixed:
         print(f"  [pre-pass] stripped UTF-8 BOM from {bom_fixed} file(s)")
 
-    from checks.check_data_integrity import _check_orphaned_nbt
-    from utils.paths import data_dir
-    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-    structures_dir = data_dir(namespace_root, "structure")
-    template_pool_dir = namespace_root / "worldgen" / "template_pool"
-    if structures_dir.exists() and template_pool_dir.exists():
+    project = svc.project
+    if project.structures_dir.exists() and project.template_pool_dir.exists():
+        from checks.check_data_integrity import _check_orphaned_nbt
         ctx.orphan_nbts = {
-            (structures_dir / rel).resolve()
-            for rel in _check_orphaned_nbt(template_pool_dir, structures_dir, ctx.namespace)
+            (project.structures_dir / rel).resolve() for rel in _check_orphaned_nbt(project)
         }
+        svc.structures.set_orphans(ctx.orphan_nbts)
 
     results = run_checks(ctx, only=args.check or None, skip=args.skip_check or None)
     _print_summary(results)

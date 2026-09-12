@@ -1,132 +1,87 @@
+"""Attribute ids have the right shape and naming for the file's target range.
+
+Entity attributes and an item stack's attribute modifiers are two different
+things that moved on two different releases: entity ``Attributes`` became
+``attributes`` at 1.21, while an item's modifiers travelled with the rest of
+item NBT at 1.20.5 (``tag.AttributeModifiers`` ->
+``components.minecraft:attribute_modifiers``). Naming is a third boundary
+common to both: at 1.21.2 attribute ids lost their ``generic.`` / ``player.`` /
+``zombie.`` prefixes.
+
+Only *attribute* ids are validated against the ``attribute`` registry. A
+modifier's own ``id`` (since 1.21 a resource location such as
+``minecraft:random_spawn_bonus``) lives in no registry and is skipped.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Iterator, TYPE_CHECKING
 
-import nbtlib
-
-from registries.fetcher import fetch_registry_set
-from utils.boundaries import DV_1_20_5, DV_1_21, DV_1_21_2, BoundarySide, side_of
-from utils.entity_walk import iter_entities
-from utils.nbt_cache import load_nbt
-from utils.nbt_versions import _build_nbt_version_ranges, _parse_version
-from utils.paths import data_dir
-from utils.versions import load_version_map
+from core.context import services
+from core.items import block_entity_items, entity_items
+from core.mcversions import DV_1_20_5, DV_1_21, DV_1_21_2, BoundarySide, side_of
 
 if TYPE_CHECKING:
-    from validator import ValidatorContext
-
+    from core.context import ValidatorContext
 
 _PREFIXES = ("generic.", "player.", "zombie.")
 
 
 @dataclass(frozen=True)
 class _ShapeBoundary:
-    """Where the *shape* of an attribute list changes, per place the list lives.
-
-    Entity attributes and an item stack's attribute modifiers are two different
-    things and moved on two different releases. Entity `Attributes` became
-    `attributes` at 1.21. An item's modifiers travelled with the rest of item NBT
-    a full release earlier, at 1.20.5, when `tag` became `components` -- so a file
-    floored at 1.20.5 carrying item modifiers under `components` is correct, and
-    judging it against the 1.21 boundary reports a shape error that isn't there.
-
-    Naming (the `generic.` prefix) is a separate 1.21.2 boundary and applies to
-    both; it is handled below, outside this table.
-    """
     dv: int
     version: str
-    legacy: str      # what the pre-boundary form is called, for error text
-    new: str         # what the post-boundary form is called
-    label: str       # how to refer to the list as a whole
+    legacy: str
+    new: str
+    label: str
 
 
 _SHAPE_BOUNDARIES: dict[str, _ShapeBoundary] = {
-    "entity": _ShapeBoundary(
-        dv=DV_1_21,
-        version="1.21",
-        legacy="`Attributes` list",
-        new="`attributes` list",
-        label="attribute list",
-    ),
-    "item": _ShapeBoundary(
-        dv=DV_1_20_5,
-        version="1.20.5",
-        legacy="`tag.AttributeModifiers`",
-        new="`components.minecraft:attribute_modifiers`",
-        label="item attribute modifiers",
-    ),
+    "entity": _ShapeBoundary(DV_1_21, "1.21", "`Attributes` list", "`attributes` list", "attribute list"),
+    "item": _ShapeBoundary(DV_1_20_5, "1.20.5", "`tag.AttributeModifiers`",
+                           "`components.minecraft:attribute_modifiers`", "item attribute modifiers"),
 }
 
 
 def _strip_ns(id_: str) -> str:
-    if id_.startswith("minecraft:"):
-        return id_[len("minecraft:"):]
-    return id_
+    return id_[len("minecraft:"):] if id_.startswith("minecraft:") else id_
 
 
 def _has_legacy_prefix(bare_id: str) -> bool:
     return any(bare_id.startswith(p) for p in _PREFIXES)
 
 
-def _iter_entity_attribute_ids(entity_nbt: nbtlib.Compound, entity_path: str) -> Iterator[tuple[str, str, str]]:
-    """Yield (id, path, shape) where shape is 'legacy' (Attributes) or 'new' (attributes).
-
-    Only *attribute* ids are yielded -- i.e. `Attributes[i].Name` and
-    `attributes[i].id`. The nested `attributes[i].modifiers[j].id` is NOT an
-    attribute id: since 1.21 it is the modifier's own resource location (an
-    identity used for add/remove and stacking), e.g. vanilla's
-    `minecraft:random_spawn_bonus` on a naturally-spawned mob's follow_range.
-    Those ids live in no registry at all -- there is no attribute-modifier
-    registry in any version -- so they cannot be validated here, and looking
-    them up in the `attribute` registry flagged every naturally-spawned mob
-    captured into a structure. Skipped deliberately; the legacy `Attributes`
-    branch below has always (correctly) skipped `Modifiers` for the same reason.
-    """
-    legacy = entity_nbt.get("Attributes")
+def _iter_entity_attribute_ids(entity: dict, entity_path: str) -> Iterator[tuple[str, str, str]]:
+    """``(id, path, shape)`` for ``Attributes[i].Name`` (legacy) and ``attributes[i].id`` (new).
+    ``attributes[i].modifiers[j].id`` is deliberately not yielded (see module doc)."""
+    legacy = entity.get("Attributes")
     if isinstance(legacy, list):
         for i, entry in enumerate(legacy):
-            if not isinstance(entry, nbtlib.Compound):
-                continue
-            name = entry.get("Name")
-            if name is not None:
-                yield str(name), f"{entity_path}.Attributes[{i}].Name", "legacy"
-
-    new_ = entity_nbt.get("attributes")
+            if isinstance(entry, dict) and entry.get("Name") is not None:
+                yield str(entry["Name"]), f"{entity_path}.Attributes[{i}].Name", "legacy"
+    new_ = entity.get("attributes")
     if isinstance(new_, list):
         for i, entry in enumerate(new_):
-            if not isinstance(entry, nbtlib.Compound):
-                continue
-            id_tag = entry.get("id")
-            if id_tag is not None:
-                yield str(id_tag), f"{entity_path}.attributes[{i}].id", "new"
-            # entry["modifiers"][j]["id"] is intentionally not yielded -- see docstring.
+            if isinstance(entry, dict) and entry.get("id") is not None:
+                yield str(entry["id"]), f"{entity_path}.attributes[{i}].id", "new"
 
 
-def _iter_item_attribute_ids(item: nbtlib.Compound, slot_path: str) -> Iterator[tuple[str, str, str]]:
+def _iter_item_attribute_ids(item: dict, slot_path: str) -> Iterator[tuple[str, str, str]]:
     tag = item.get("tag")
-    if isinstance(tag, nbtlib.Compound):
+    if isinstance(tag, dict):
         mods = tag.get("AttributeModifiers")
         if isinstance(mods, list):
             for i, m in enumerate(mods):
-                if not isinstance(m, nbtlib.Compound):
-                    continue
-                name = m.get("AttributeName")
-                if name is not None:
-                    yield str(name), f"{slot_path}.tag.AttributeModifiers[{i}].AttributeName", "legacy"
+                if isinstance(m, dict) and m.get("AttributeName") is not None:
+                    yield str(m["AttributeName"]), f"{slot_path}.tag.AttributeModifiers[{i}].AttributeName", "legacy"
 
     comps = item.get("components")
-    if isinstance(comps, nbtlib.Compound):
+    if isinstance(comps, dict):
         am = comps.get("minecraft:attribute_modifiers")
-        modifiers = None
-        if isinstance(am, nbtlib.Compound):
-            modifiers = am.get("modifiers")
-        elif isinstance(am, list):
-            modifiers = am
+        modifiers = am.get("modifiers") if isinstance(am, dict) else (am if isinstance(am, list) else None)
         if isinstance(modifiers, list):
             for i, m in enumerate(modifiers):
-                if not isinstance(m, nbtlib.Compound):
+                if not isinstance(m, dict):
                     continue
                 for key in ("type", "attribute"):
                     val = m.get(key)
@@ -135,61 +90,15 @@ def _iter_item_attribute_ids(item: nbtlib.Compound, slot_path: str) -> Iterator[
                         break
 
 
-def _iter_entity_items(entity_nbt: nbtlib.Compound, entity_path: str) -> Iterator[tuple[str, nbtlib.Compound]]:
-    for list_field in ("HandItems", "ArmorItems"):
-        items = entity_nbt.get(list_field)
-        if isinstance(items, list):
-            for i, item in enumerate(items):
-                if isinstance(item, nbtlib.Compound):
-                    yield f"{entity_path}.{list_field}[{i}]", item
-    for field in ("body_armor_item", "SaddleItem", "Item"):
-        item = entity_nbt.get(field)
-        if isinstance(item, nbtlib.Compound):
-            yield f"{entity_path}.{field}", item
-    equip = entity_nbt.get("equipment")
-    if isinstance(equip, nbtlib.Compound):
-        for slot, item in equip.items():
-            if isinstance(item, nbtlib.Compound):
-                yield f"{entity_path}.equipment.{slot}", item
-
-
-def _iter_block_items(nbt: nbtlib.Compound) -> Iterator[tuple[str, nbtlib.Compound]]:
-    for i, block_entry in enumerate(nbt.get("blocks") or []):
-        block_nbt = block_entry.get("nbt")
-        if not isinstance(block_nbt, nbtlib.Compound):
-            continue
-        base = f"blocks[{i}].nbt"
-        items = block_nbt.get("Items")
-        if isinstance(items, list):
-            for j, item in enumerate(items):
-                if isinstance(item, nbtlib.Compound):
-                    yield f"{base}.Items[{j}]", item
-        for field in ("Book", "item"):
-            it = block_nbt.get(field)
-            if isinstance(it, nbtlib.Compound):
-                yield f"{base}.{field}", it
-
-
 def _flag(attr_id: str, path: str, rel: str, shape: str, origin: str,
           min_v: str, max_v: str, min_dv: int, max_dv: int,
           valid_min: set[str] | None, valid_max: set[str] | None) -> list[str]:
-    """Flag an attribute id if its shape or prefix form is wrong for the target range.
-
-    `origin` says where the id was found -- "entity" for an entity's own attribute
-    list, "item" for an item stack's attribute modifiers -- and picks the shape
-    boundary, since the two moved on different releases (see `_SHAPE_BOUNDARIES`).
-
-    Uses per-version `attribute` registry when available: an id must appear in
-    both the min-version and max-version registries. If either lookup misses,
-    figure out whether it's a prefix mismatch and emit a targeted message.
-    """
     bare = _strip_ns(attr_id)
     prefixed = _has_legacy_prefix(bare)
     fq = attr_id if ":" in attr_id else f"minecraft:{bare}"
     unfq = f"minecraft:{bare[bare.index('.') + 1:]}" if prefixed else fq
     fqfq = f"minecraft:generic.{bare}" if not prefixed else fq
 
-    # Shape boundary: 1.21 for entity attributes, 1.20.5 for item modifiers.
     b = _SHAPE_BOUNDARIES[origin]
     field_side = side_of(min_dv, max_dv, b.dv)
     errors: list[str] = []
@@ -213,22 +122,17 @@ def _flag(attr_id: str, path: str, rel: str, shape: str, origin: str,
         )
         return errors
 
-    # Prefix check at 1.21.2.
     prefix_side = side_of(min_dv, max_dv, DV_1_21_2)
 
-    # If both registries are available, prefer the registry-based check.
     if valid_min is not None and valid_max is not None:
         if prefix_side == BoundarySide.NEW and fq not in valid_min:
-            # min registry (1.21.2+) uses unprefixed ids
             if prefixed:
                 errors.append(
                     f"[ERROR] {rel}: {path}: attribute id '{attr_id}' has legacy prefix on a"
                     f" min>=1.21.2 target ({min_v}); use '{unfq}'"
                 )
             else:
-                errors.append(
-                    f"[ERROR] {rel}: {path}: unknown attribute id '{attr_id}' (min target {min_v})"
-                )
+                errors.append(f"[ERROR] {rel}: {path}: unknown attribute id '{attr_id}' (min target {min_v})")
         elif prefix_side == BoundarySide.OLD and fq not in valid_max:
             if not prefixed:
                 errors.append(
@@ -236,11 +140,8 @@ def _flag(attr_id: str, path: str, rel: str, shape: str, origin: str,
                     f" a max<1.21.2 target ({max_v}); use '{fqfq}'"
                 )
             else:
-                errors.append(
-                    f"[ERROR] {rel}: {path}: unknown attribute id '{attr_id}' (max target {max_v})"
-                )
-        elif prefix_side == BoundarySide.SPANS and (prefixed or not prefixed):
-            # Attribute id must be one shape or the other; either way it breaks somewhere.
+                errors.append(f"[ERROR] {rel}: {path}: unknown attribute id '{attr_id}' (max target {max_v})")
+        elif prefix_side == BoundarySide.SPANS:
             if prefixed and fq not in valid_min:
                 errors.append(
                     f"[ERROR] {rel}: {path}: attribute id '{attr_id}' is prefixed but wired"
@@ -255,7 +156,7 @@ def _flag(attr_id: str, path: str, rel: str, shape: str, origin: str,
                 )
         return errors
 
-    # Fallback prefix-only logic when registries are unavailable.
+    # Registries unavailable: prefix-only reasoning.
     if prefix_side == BoundarySide.NEW and prefixed:
         errors.append(
             f"[ERROR] {rel}: {path}: attribute id '{attr_id}' has legacy prefix on a"
@@ -270,90 +171,59 @@ def _flag(attr_id: str, path: str, rel: str, shape: str, origin: str,
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-    structures_dir = data_dir(namespace_root, "structure")
-    if not structures_dir.exists():
+    svc = services(ctx)
+    store, reg = svc.structures, svc.mcmeta
+    if not store.dir.exists():
         return True, "no structures directory"
-
-    cache_dir = Path(__file__).parent.parent / "cache"
-    version_map = load_version_map(cache_dir, ctx.refresh)
-    if not version_map:
+    if not svc.versions:
         return True, "skipped (no version map)"
 
-    global_min_version = min(ctx.mc_versions, key=_parse_version)
-    global_max_version = max(ctx.mc_versions, key=_parse_version)
-    template_pool_dir = namespace_root / "worldgen" / "template_pool"
-    nbt_ranges = {}
-    if template_pool_dir.exists():
-        nbt_ranges = _build_nbt_version_ranges(
-            template_pool_dir, structures_dir, ctx.namespace, global_min_version,
-            ctx.mc_versions, global_max_version,
-        )
-
-    attr_cache: dict[str, set[str]] = {}
+    attr_sets: dict[str, set[str] | None] = {}
 
     def attrs_for(version: str) -> set[str] | None:
-        if version not in attr_cache:
+        if version not in attr_sets:
             try:
-                attr_cache[version] = fetch_registry_set(version, cache_dir, ctx.refresh, "attribute")
+                attr_sets[version] = reg.registry(version, "attribute") or None
             except Exception:
-                attr_cache[version] = set()
-        return attr_cache[version] or None
+                attr_sets[version] = None
+        return attr_sets[version]
 
     errors: list[str] = []
     files_checked = 0
     attrs_checked = 0
 
-    for nbt_path in sorted(structures_dir.rglob("*.nbt")):
-        if nbt_path.resolve() in ctx.orphan_nbts:
-            continue
-        try:
-            nbt = load_nbt(ctx, nbt_path)
-        except Exception:
+    for nbt_path in store.checked_files():
+        structure = store.try_load(nbt_path)
+        if structure is None:
             continue
         files_checked += 1
-        rel = str(nbt_path.relative_to(structures_dir))
+        rel = store.rel(nbt_path)
 
-        info = nbt_ranges.get(nbt_path)
-        file_min = info.min_version if info else global_min_version
-        file_max = info.max_version if info else global_max_version
-        min_dv = version_map.get(file_min)
-        max_dv = version_map.get(file_max)
-        if min_dv is None or max_dv is None:
+        fr = svc.file_range(nbt_path)
+        if not fr.resolved:
             continue
+        valid_min = attrs_for(fr.min_version)
+        valid_max = attrs_for(fr.max_version)
+        args = (fr.min_version, fr.max_version, fr.min_dv, fr.max_dv, valid_min, valid_max)
 
-        valid_min = attrs_for(file_min)
-        valid_max = attrs_for(file_max)
-
-        for entity_nbt, entity_path in iter_entities(nbt):
-            for attr_id, path, shape in _iter_entity_attribute_ids(entity_nbt, entity_path):
+        for entity, entity_path in structure.walk_entities():
+            for attr_id, path, shape in _iter_entity_attribute_ids(entity, entity_path):
                 attrs_checked += 1
-                errors.extend(_flag(
-                    attr_id, path, rel, shape, "entity",
-                    file_min, file_max, min_dv, max_dv, valid_min, valid_max,
-                ))
-            for slot_path, item in _iter_entity_items(entity_nbt, entity_path):
+                errors.extend(_flag(attr_id, path, rel, shape, "entity", *args))
+            for slot_path, item in entity_items(entity, entity_path):
                 for attr_id, path, shape in _iter_item_attribute_ids(item, slot_path):
                     attrs_checked += 1
-                    errors.extend(_flag(
-                        attr_id, path, rel, shape, "item",
-                        file_min, file_max, min_dv, max_dv, valid_min, valid_max,
-                    ))
+                    errors.extend(_flag(attr_id, path, rel, shape, "item", *args))
 
-        for slot_path, item in _iter_block_items(nbt):
+        for slot_path, item in block_entity_items(structure.block_entities):
             for attr_id, path, shape in _iter_item_attribute_ids(item, slot_path):
                 attrs_checked += 1
-                errors.extend(_flag(
-                    attr_id, path, rel, shape, "item",
-                    file_min, file_max, min_dv, max_dv, valid_min, valid_max,
-                ))
+                errors.extend(_flag(attr_id, path, rel, shape, "item", *args))
 
     for msg in errors:
         print(f"  {msg}")
 
     if not errors:
         print(f"  {files_checked} file(s), {attrs_checked} attribute id(s) checked -- all valid")
-
-    if errors:
-        return False, f"{len(errors)} attribute id error(s)"
-    return True, f"{files_checked} files, {attrs_checked} attribute ids checked"
+        return True, f"{files_checked} files, {attrs_checked} attribute ids checked"
+    return False, f"{len(errors)} attribute id error(s)"

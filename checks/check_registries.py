@@ -1,175 +1,97 @@
+"""Item and block ids exist in the Minecraft registries for the targeted versions.
+
+Two independent halves: the ids a loot table names (checked against the lowest
+targeted version), and every block id in every structure palette.
+
+Each structure is checked against its *minimum* wired version only. On load the
+game runs the file through DataFixerUpper keyed on the file's own DataVersion,
+so a block renamed in a later version (``chain`` -> ``iron_chain``, ``grass`` ->
+``short_grass``) is re-mapped upward for us. A palette valid at the file's floor
+is valid at every version above it; only the floor can fail.
+
+An unknown ``minecraft:`` block is annotated with the first release newer than
+the failing version that does know it, or ``unknown ID`` when none does.
+"""
 from __future__ import annotations
 
-import json
 from collections import defaultdict
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-import nbtlib
-
-from registries.fetcher import _fetch_version
-from registries.version_probe import find_version_added
-from utils.nbt_cache import load_nbt
-from utils.nbt_versions import _build_nbt_min_versions, _parse_version
-from utils.paths import data_dir
+from core.context import services
+from core.ids import is_valid, non_minecraft
+from core.loot import collect_loot_ids as _collect_ids
+from core.mcversions import parse_version
 
 if TYPE_CHECKING:
-    from validator import ValidatorContext
-
-
-def _collect_ids(node: object, items: set[str], blocks: set[str]) -> None:
-    if isinstance(node, dict):
-        entry_type = node.get("type", "")
-        condition = node.get("condition", "")
-
-        # item entry: type ends in ":item", name is the item ID
-        if isinstance(entry_type, str) and entry_type.endswith(":item"):
-            name = node.get("name")
-            if isinstance(name, str) and ":" in name:
-                items.add(name)
-
-        # block_state_property condition: block field is a block ID
-        if isinstance(condition, str) and condition.endswith(":block_state_property"):
-            block = node.get("block")
-            if isinstance(block, str) and ":" in block:
-                blocks.add(block)
-
-        # function node with explicit name (e.g. set_item): name is an item ID
-        func = node.get("function", "")
-        if isinstance(func, str) and func:
-            name = node.get("name")
-            if isinstance(name, str) and ":" in name:
-                items.add(name)
-
-            # set_contents/give_item and similar: nested item entries under `entries`
-            # or a direct `item` field with an id.
-            if func.endswith(":set_contents") or func.endswith(":give_item"):
-                item = node.get("item")
-                if isinstance(item, dict):
-                    for key in ("id", "name"):
-                        val = item.get(key)
-                        if isinstance(val, str) and ":" in val:
-                            items.add(val)
-                elif isinstance(item, str) and ":" in item:
-                    items.add(item)
-
-        for val in node.values():
-            _collect_ids(val, items, blocks)
-
-    elif isinstance(node, list):
-        for item in node:
-            _collect_ids(item, items, blocks)
-
-
-def _is_valid(id_: str, valid_set: set[str], extra_ids: set[str]) -> bool:
-    if id_ in valid_set:
-        return True
-    if id_ in extra_ids:
-        return True
-    ns = id_.split(":", 1)[0]
-    if f"{ns}:*" in extra_ids:
-        return True
-    return False
+    from core.context import ValidatorContext
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-    loot_table_dir = data_dir(namespace_root, "loot_table")
-    structure_dir = data_dir(namespace_root, "structure")
+    svc = services(ctx)
+    project, store, reg = svc.project, svc.structures, svc.mcmeta
+    loot_table_dir = project.loot_table_dir
+    structure_dir = project.structures_dir
 
     have_loot_tables = loot_table_dir.exists()
     if not have_loot_tables and not structure_dir.exists():
         print("  no loot table or structure directory — skipped")
         return True, "skipped (nothing to scan)"
 
-    cache_dir = Path(__file__).parent.parent / "cache"
-    global_min_version = min(ctx.mc_versions, key=_parse_version)
-
-    # The loot-table half and the palette half are independent: a pack with no
-    # loot tables still has NBT palettes worth scanning, and vice versa.
+    global_min_version = svc.global_min
     unknown_items: list[str] = []
     unknown_blocks: list[str] = []
 
     if have_loot_tables:
         all_items: set[str] = set()
         all_blocks: set[str] = set()
-
-        for json_path in sorted(loot_table_dir.rglob("*.json")):
-            try:
-                with json_path.open(encoding="utf-8-sig") as f:
-                    data = json.load(f)
-            except json.JSONDecodeError:
+        for json_path in project.json_files(loot_table_dir):
+            data = project.try_json(json_path)
+            if data is None:
                 continue
             _collect_ids(data, all_items, all_blocks)
 
-        lt_vdata = _fetch_version(global_min_version, cache_dir, ctx.refresh)
-        valid_items_min = (
-            {"minecraft:" + n for n in lt_vdata.get("item", [])}
-            | {i for i in ctx.valid_items if not i.startswith("minecraft:")}
-        )
-        valid_blocks_min = (
-            {"minecraft:" + n for n in lt_vdata.get("block", [])}
-            | {b for b in ctx.valid_blocks if not b.startswith("minecraft:")}
-        )
+        valid_items_min = reg.registry(global_min_version, "item") | non_minecraft(ctx.valid_items)
+        valid_blocks_min = reg.registry(global_min_version, "block") | non_minecraft(ctx.valid_blocks)
+        unknown_items = sorted(i for i in all_items if not is_valid(i, valid_items_min, ctx.extra_ids))
+        unknown_blocks = sorted(b for b in all_blocks if not is_valid(b, valid_blocks_min, ctx.extra_ids))
 
-        unknown_items = sorted(
-            id_ for id_ in all_items if not _is_valid(id_, valid_items_min, ctx.extra_ids)
-        )
-        unknown_blocks = sorted(
-            id_ for id_ in all_blocks if not _is_valid(id_, valid_blocks_min, ctx.extra_ids)
-        )
-
-    # NBT palette scan — grouped by block ID.
-    #
-    # Each file is checked against its *minimum* covered version only. On load the
-    # game runs the structure through DataFixerUpper keyed on the file's own
-    # DataVersion, so blocks renamed in a later version (chain -> iron_chain,
-    # grass -> short_grass) are re-mapped upward for us. A palette that is valid at
-    # the file's floor is therefore valid at every version above it — only the
-    # floor can fail, so checking every covered version would only invent errors.
-    template_pool_dir = namespace_root / "worldgen" / "template_pool"
+    # Palette scan, grouped by block id.
     by_block: dict[str, list[str]] = defaultdict(list)
-    nbt_min_versions: dict[Path, str] = {}
-    if template_pool_dir.exists():
-        nbt_min_versions = _build_nbt_min_versions(
-            template_pool_dir, structure_dir, ctx.namespace, global_min_version, ctx.mc_versions
-        )
-
-    non_minecraft_valid = {id_ for id_ in ctx.valid_blocks if not id_.startswith("minecraft:")}
-    version_block_cache: dict[str, set[str]] = {}
+    lowest_failing: dict[str, str] = {}
+    non_minecraft_blocks = non_minecraft(ctx.valid_blocks)
+    valid_for_version: dict[str, set[str]] = {}
 
     if structure_dir.exists():
-        for nbt_path in sorted(structure_dir.rglob("*.nbt")):
-            if nbt_path.resolve() in ctx.orphan_nbts:
-                continue
+        for nbt_path in store.checked_files():
             try:
-                nbt = load_nbt(ctx, nbt_path)
+                structure = store.load(nbt_path)
             except Exception:
                 continue
-            palette = nbt.get("palette")
-            if palette is None:
+            variants = structure.palette_variants
+            if not variants:
                 continue
-            rel = str(nbt_path.relative_to(structure_dir))
+            rel = store.rel(nbt_path)
 
-            file_version = nbt_min_versions.get(nbt_path, global_min_version)
-            if file_version not in version_block_cache:
-                vdata = _fetch_version(file_version, cache_dir, ctx.refresh)
-                version_block_cache[file_version] = (
-                    {"minecraft:" + n for n in vdata.get("block", [])} | non_minecraft_valid
-                )
-            valid_blocks_for_file = version_block_cache[file_version]
+            file_version = svc.file_min_version(nbt_path)
+            valid_blocks_for_file = valid_for_version.get(file_version)
+            if valid_blocks_for_file is None:
+                valid_blocks_for_file = reg.registry(file_version, "block") | non_minecraft_blocks
+                valid_for_version[file_version] = valid_blocks_for_file
 
             seen_in_file: set[str] = set()
-            for entry in palette:
-                name_tag = entry.get("Name")
-                if name_tag is None:
-                    continue
-                name = str(name_tag)
-                if ":" in name and name not in seen_in_file and not _is_valid(name, valid_blocks_for_file, ctx.extra_ids):
-                    by_block[name].append(rel)
-                    seen_in_file.add(name)
+            for palette in variants:
+                for entry in palette:
+                    name_tag = entry.get("Name") if isinstance(entry, dict) else None
+                    if name_tag is None:
+                        continue
+                    name = str(name_tag)
+                    if ":" in name and name not in seen_in_file and not is_valid(name, valid_blocks_for_file, ctx.extra_ids):
+                        by_block[name].append(rel)
+                        seen_in_file.add(name)
+                        prev = lowest_failing.get(name)
+                        if prev is None or parse_version(file_version) < parse_version(prev):
+                            lowest_failing[name] = file_version
 
-    # print loot table results
     if not have_loot_tables:
         print("  loot tables: no loot table directory — skipped")
     elif unknown_items or unknown_blocks:
@@ -187,10 +109,9 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     annotations: dict[str, str] = {}
     for block_id in by_block:
         if block_id.startswith("minecraft:"):
-            result = find_version_added(block_id, cache_dir, ctx.refresh)
-            annotations[block_id] = f"added in {result}" if result else "unknown ID"
+            added = reg.version_added("block", block_id, lowest_failing[block_id])
+            annotations[block_id] = f"added in {added}" if added else "unknown ID"
 
-    # print palette results
     if by_block:
         total_files = sum(len(v) for v in by_block.values())
         print(f"  NBT palettes: {len(by_block)} unknown block type(s) across {total_files} file(s):")
@@ -220,5 +141,4 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         summary = "all IDs valid"
     else:
         summary = "all palette IDs valid (no loot tables)"
-
     return overall_pass, summary

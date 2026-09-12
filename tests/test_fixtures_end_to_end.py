@@ -929,3 +929,54 @@ def test_bad_palette_still_fails_alongside_loot_tables(tmp_path, monkeypatch):
     passed, summary = mod.run(ctx)
     assert not passed
     assert "palettes" in summary
+
+
+# ---------- check_jigsaw_pools ----------
+
+def _jigsaw_pack(tmp_path, monkeypatch, pool: str, template_pools: set[str] | None):
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, blocks={"minecraft:jigsaw"}, template_pools=template_pools)
+    palette = [Compound({"Name": String("minecraft:jigsaw")})]
+    jigsaw = Compound({"id": String("minecraft:jigsaw"), "pool": String(pool)})
+    nbt = structure_nbt(4325, palette=palette, blocks=[block_entry(0, nbt=jigsaw)])
+    save(nbt, structures / "j.nbt")
+    _wire(pools / "p.json", "test:j", {"1.21.5-1.21.11": "test:j"})
+    return FakeContext("test", ["1.21.5", "1.21.11"], root)
+
+
+def test_jigsaw_vanilla_pool_that_exists_is_silent(tmp_path, monkeypatch, capsys):
+    ctx = _jigsaw_pack(tmp_path, monkeypatch, "minecraft:village/plains/houses",
+                       {"minecraft:village/plains/houses"})
+    from checks import check_jigsaw_pools as mod
+    passed, summary = mod.run(ctx)
+    assert passed
+    assert "WARN" not in capsys.readouterr().out
+    assert summary == "1 jigsaw block(s), all valid"
+
+
+def test_jigsaw_vanilla_pool_that_does_not_exist_warns(tmp_path, monkeypatch, capsys):
+    ctx = _jigsaw_pack(tmp_path, monkeypatch, "minecraft:village/plains/hoses",
+                       {"minecraft:village/plains/houses"})
+    from checks import check_jigsaw_pools as mod
+    passed, summary = mod.run(ctx)
+    assert passed  # warn-only
+    out = capsys.readouterr().out
+    assert "vanilla pool not found" in out and "hoses" in out
+    assert summary == "1 jigsaw block(s), 1 pool warning(s)"
+
+
+def test_jigsaw_vanilla_pool_is_not_checked_without_the_registry(tmp_path, monkeypatch, capsys):
+    """No template pool registry (offline, or a version mcmeta lacks): stay quiet."""
+    ctx = _jigsaw_pack(tmp_path, monkeypatch, "minecraft:village/plains/hoses", None)
+    from checks import check_jigsaw_pools as mod
+    passed, _ = mod.run(ctx)
+    assert passed
+    assert "WARN" not in capsys.readouterr().out
+
+
+def test_jigsaw_own_pool_missing_warns(tmp_path, monkeypatch, capsys):
+    ctx = _jigsaw_pack(tmp_path, monkeypatch, "test:nope", None)
+    from checks import check_jigsaw_pools as mod
+    passed, _ = mod.run(ctx)
+    assert passed
+    assert "pool not found" in capsys.readouterr().out

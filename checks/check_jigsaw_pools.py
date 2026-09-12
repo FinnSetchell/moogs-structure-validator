@@ -1,85 +1,85 @@
+"""Every jigsaw block's ``pool`` names a real template pool (warn-only).
+
+A pool in our namespace must have a matching JSON under
+``worldgen/template_pool``. A ``minecraft:`` pool must exist in vanilla on at
+least one targeted version, per misode/mcmeta's ``worldgen/template_pool``
+registry (when that registry cannot be fetched, vanilla pools are taken as
+valid, as they always were). Any other namespace warns: it cannot be verified
+from this pack.
+"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from utils.nbt_cache import load_nbt
-from utils.paths import data_dir
+from checks.check_containers import format_pos
+from core.context import Services, services
 
 if TYPE_CHECKING:
-    from validator import ValidatorContext
+    from core.context import ValidatorContext
 
-# Pool refs in these namespaces are always valid without a local file check
-_EXTERNAL_OK = {"minecraft"}
+
+def _vanilla_pools(svc: Services) -> set[str] | None:
+    """Every vanilla template pool id on any targeted version; None when the
+    registry is unavailable (then vanilla refs are not checked)."""
+    try:
+        pools = svc.mcmeta.union("worldgen/template_pool")
+    except Exception:
+        return None
+    return pools or None
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-    structure_dir = data_dir(namespace_root, "structure")
-    template_pool_dir = namespace_root / "worldgen" / "template_pool"
-
-    if not structure_dir.exists():
+    svc = services(ctx)
+    project, store = svc.project, svc.structures
+    if not store.dir.exists():
         return True, "no structures directory"
 
-    known_pools: set[str] = set()
-    if template_pool_dir.exists():
-        for json_path in template_pool_dir.rglob("*.json"):
-            rel = json_path.relative_to(template_pool_dir)
-            pool_name = str(rel.with_suffix("")).replace("\\", "/")
-            known_pools.add(f"{ctx.namespace}:{pool_name}")
+    pool_dir = project.template_pool_dir
+    known_pools = {
+        f"{ctx.namespace}:{str(p.relative_to(pool_dir).with_suffix('')).replace(chr(92), '/')}"
+        for p in project.json_files(pool_dir)
+    }
 
+    vanilla_pools = _vanilla_pools(svc)
     warnings: list[str] = []
     jigsaw_count = 0
 
-    for nbt_path in sorted(structure_dir.rglob("*.nbt")):
-        if nbt_path.resolve() in ctx.orphan_nbts:
-            continue
+    for nbt_path in store.checked_files():
         try:
-            nbt = load_nbt(ctx, nbt_path)
+            structure = store.load(nbt_path)
         except Exception:
             continue
-
-        palette = nbt.get("palette")
-        blocks = nbt.get("blocks")
-        if palette is None or blocks is None:
+        if structure.palette is None:
             continue
 
-        rel = str(nbt_path.relative_to(structure_dir))
-
-        jigsaw_indices: set[int] = set()
-        for i, state in enumerate(palette):
-            if str(state.get("Name", "")) == "minecraft:jigsaw":
-                jigsaw_indices.add(i)
-
+        rel = store.rel(nbt_path)
+        jigsaw_indices = {i for i, name in enumerate(structure.palette_names()) if name == "minecraft:jigsaw"}
         if not jigsaw_indices:
             continue
 
-        for block in blocks:
-            state_idx = int(block.get("state", -1))
-            if state_idx not in jigsaw_indices:
-                continue
-
-            block_nbt = block.get("nbt")
+        for _, _, pos, block_nbt in structure.blocks_in_states(jigsaw_indices):
             if block_nbt is None:
                 continue
             pool_tag = block_nbt.get("pool")
             if pool_tag is None:
                 continue
-
             pool = str(pool_tag)
             jigsaw_count += 1
 
             if ":" not in pool:
                 continue
             ns = pool.split(":", 1)[0]
-            if ns in _EXTERNAL_OK:
-                continue
-            if ns == ctx.namespace and pool in known_pools:
-                continue
-
-            pos_tag = block.get("pos")
-            pos = f"({', '.join(str(int(x)) for x in pos_tag)})" if pos_tag is not None else "(?)"
-            reason = "pool not found" if ns == ctx.namespace else "unknown namespace"
-            warnings.append(f"{rel} @ {pos} -> {pool!r} ({reason})")
+            if ns == ctx.namespace:
+                if pool in known_pools:
+                    continue
+                reason = "pool not found"
+            elif ns == "minecraft":
+                if vanilla_pools is None or pool in vanilla_pools:
+                    continue
+                reason = "vanilla pool not found"
+            else:
+                reason = "unknown namespace"
+            warnings.append(f"{rel} @ {format_pos(pos)} -> {pool!r} ({reason})")
 
     for msg in warnings:
         print(f"  [WARN] jigsaw pool: {msg}")

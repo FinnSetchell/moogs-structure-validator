@@ -16,7 +16,7 @@ import pathlib
 import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-SCANNED_DIRS = ("checks", "utils")
+SCANNED_DIRS = ("checks", "core")
 CONSOLE_CODEC = "cp1252"
 
 

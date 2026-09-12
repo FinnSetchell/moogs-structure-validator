@@ -1,32 +1,33 @@
+"""Every ``.nbt`` under the structures directory parses as NBT.
+
+This is the check that pays for parsing: every file is loaded here (orphans
+included) and the parsed structure is shared with every later check.
+"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from utils.nbt_cache import load_nbt
-from utils.paths import data_dir
+from core.context import services
 
 if TYPE_CHECKING:
-    from validator import ValidatorContext
+    from core.context import ValidatorContext
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-    structures_dir = data_dir(namespace_root, "structure")
+    store = services(ctx).structures
 
-    if not structures_dir.exists():
-        print(f"  structure directory not found: {structures_dir}")
+    if not store.dir.exists():
+        print(f"  structure directory not found: {store.dir}")
         return False, "structure directory missing"
 
     ok = 0
     corrupt: list[tuple[str, str]] = []
-
-    for nbt_path in sorted(structures_dir.rglob("*.nbt")):
-        rel = nbt_path.relative_to(structures_dir)
+    for nbt_path in store.files:
         try:
-            load_nbt(ctx, nbt_path)
+            store.load(nbt_path)
             ok += 1
         except Exception as e:
-            corrupt.append((str(rel), str(e)))
+            corrupt.append((store.rel(nbt_path), str(e)))
 
     total = ok + len(corrupt)
     if corrupt:

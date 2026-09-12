@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Callable
 
 import nbtlib
 from nbtlib import Compound, Double, File, Float, Int, List, String
@@ -92,9 +91,10 @@ class FakeContext:
         self.valid_items: set[str] = set()
         self.valid_entities: set[str] = set()
         self.orphan_nbts: set[Path] = set()
-        self.nbt_cache: dict = {}
 
 
+# Stable releases and their DataVersions, as misode/mcmeta's version index
+# reports them. tests/test_boundaries.py checks the boundary constants against it.
 VANILLA_VERSION_MAP = {
     "1.20": 3463,
     "1.20.1": 3465,
@@ -117,11 +117,27 @@ VANILLA_VERSION_MAP = {
 }
 
 
+def version_entries(version_map: dict[str, int] | None = None) -> list[dict]:
+    """A mcmeta-shaped version index (newest first) for ``version_map``."""
+    vm = VANILLA_VERSION_MAP if version_map is None else version_map
+    return [
+        {"id": v, "name": v, "type": "release", "stable": True, "data_version": dv}
+        for v, dv in sorted(vm.items(), key=lambda kv: -kv[1])
+    ]
+
+
 def stub_registries(monkeypatch, entities: set[str] | None = None,
                     items: set[str] | None = None, blocks: set[str] | None = None,
                     effects: set[str] | None = None, enchantments: set[str] | None = None,
-                    attributes: set[str] | None = None) -> None:
-    """Redirect network-backed helpers to in-memory sets keyed by registry name."""
+                    attributes: set[str] | None = None,
+                    template_pools: set[str] | None = None,
+                    version_map: dict[str, int] | None = None) -> None:
+    """Redirect the two network-backed fetches in ``core.mcmeta`` to in-memory data.
+
+    Every registry lookup goes through ``fetch_registry_data`` and every
+    DataVersion lookup through ``fetch_version_entries``, so patching those two
+    covers every check. The same sets are served for every MC version.
+    """
     default_by_key = {
         "entity_type": entities or set(),
         "item": items or set(),
@@ -129,38 +145,20 @@ def stub_registries(monkeypatch, entities: set[str] | None = None,
         "mob_effect": effects or set(),
         "enchantment": enchantments or set(),
         "attribute": attributes or set(),
+        "worldgen/template_pool": template_pools or set(),
     }
 
-    def fake_fetch_version(version, cache_dir, refresh):
-        # Strip minecraft: prefix so callers can re-add it as they already do.
+    def fake_fetch_registry_data(version, cache_dir, refresh):
+        # Bare names, as mcmeta ships them; callers add the minecraft: prefix.
         return {k: [n.split(":", 1)[1] if ":" in n else n for n in v]
                 for k, v in default_by_key.items()}
 
-    def fake_fetch_registry_set(version, cache_dir, refresh, key):
-        return {n if ":" in n else f"minecraft:{n}" for n in default_by_key.get(key, set())}
+    def fake_fetch_version_entries(cache_dir, refresh):
+        return version_entries(version_map)
 
-    def fake_load_version_map(cache_dir, refresh):
-        return dict(VANILLA_VERSION_MAP)
-
-    from registries import fetcher as _fetcher
-    from registries import version_probe as _version_probe
-    from utils import versions as _versions
-    monkeypatch.setattr(_fetcher, "_fetch_version", fake_fetch_version)
-    # version_probe binds _fetch_version at import time, so it needs its own patch.
-    monkeypatch.setattr(_version_probe, "_fetch_version", fake_fetch_version)
-    monkeypatch.setattr(_fetcher, "fetch_registry_set", fake_fetch_registry_set)
-    monkeypatch.setattr(_versions, "load_version_map", fake_load_version_map)
-    # Some check modules import these names directly; redirect their bindings too.
-    import importlib, pkgutil
-    import checks as _checks_pkg
-    for _, modname, _ in pkgutil.iter_modules(_checks_pkg.__path__):
-        module = importlib.import_module(f"checks.{modname}")
-        if hasattr(module, "_fetch_version"):
-            monkeypatch.setattr(module, "_fetch_version", fake_fetch_version)
-        if hasattr(module, "fetch_registry_set"):
-            monkeypatch.setattr(module, "fetch_registry_set", fake_fetch_registry_set)
-        if hasattr(module, "load_version_map"):
-            monkeypatch.setattr(module, "load_version_map", fake_load_version_map)
+    from core import mcmeta as _mcmeta
+    monkeypatch.setattr(_mcmeta, "fetch_registry_data", fake_fetch_registry_data)
+    monkeypatch.setattr(_mcmeta, "fetch_version_entries", fake_fetch_version_entries)
 
 
 def build_datapack(tmp_path: Path, namespace: str = "test") -> tuple[Path, Path, Path]:

@@ -1,3 +1,16 @@
+"""Worldgen JSON validates against the bundled vanilla and MSL schemas.
+
+Template pools, structures, structure sets and processor lists are checked
+against ``schemas/*.json``. Any ``moogs_structures:*`` type id is then
+dispatched to its MSL schema; an id MSL does not register is an error (typo
+catcher), except that a type MSL registers on *some* targeted version is real
+content and stays silent (``_MSL_TYPE_WINDOWS``).
+
+Two ``y_allowance`` shapes a JSON schema cannot express are checked by hand:
+``max_y_allowed`` below ``min_y_allowed`` (MSL rejects it at datapack load), and
+a ``max`` with no ``min`` on the generic jigsaw type (MSL unwraps the absent
+``min`` and crashes chunk generation).
+"""
 from __future__ import annotations
 
 import json
@@ -7,14 +20,13 @@ from typing import TYPE_CHECKING
 import jsonschema
 
 import schemas.patcher
-from utils.boundaries import BOUNDARIES, DV_1_21, BoundarySide, side_of
-from utils.versions import load_version_map
+from core.context import services
+from core.mcversions import DV_1_21, DV_VERSION_NAMES, BoundarySide, side_of
 
 if TYPE_CHECKING:
-    from validator import ValidatorContext
+    from core.context import ValidatorContext
 
 _SCHEMAS_DIR = Path(__file__).parent.parent / "schemas"
-_CACHE_DIR = Path(__file__).parent.parent / "cache"
 
 _SUBDIRS: list[tuple[str, str]] = [
     ("template_pool",  "template_pool.json"),
@@ -30,7 +42,6 @@ _MSL_PREFIX = "moogs_structures:"
 # min. The nether type overrides that code path and is not affected.
 _CRASHING_Y_ALLOWANCE_TYPE = "moogs_structures:moogs_structures_generic_jigsaw_structure"
 
-# MSL type-specific schemas, dispatched on the "type" / "element_type" value.
 _MSL_STRUCTURE_SCHEMAS: dict[str, str] = {
     "moogs_structures:moogs_structures_generic_jigsaw_structure": "msl_generic_jigsaw_structure.json",
     "moogs_structures:moogs_structures_generic_nether_jigsaw_structure": "msl_generic_nether_jigsaw_structure.json",
@@ -45,114 +56,27 @@ _MSL_PLACEMENT_SCHEMAS: dict[str, str] = {
     "moogs_structures:conditional_concentric_rings": "msl_conditional_concentric_rings.json",
 }
 
-# MSL's own registries are not stable across Minecraft versions: a handful of types
-# exist only on one side of a version boundary, because they wrap (or work around)
-# vanilla features that themselves appeared or disappeared there. Every type NOT
-# listed here is registered identically on every MSL branch -- verified by diffing
-# the four modinit registries across 1.20-1.20.4, 1.20.5-1.20.6, 1.21-1.21.1,
-# 1.21.2-1.21.3, 1.21.4, 1.21.5-1.21.10, 1.21.11, 26.1.0-26.1.2 and 26.2.0. Only
-# MoogsStructuresProcessors differs; MoogsStructuresStructures,
-# MoogsStructuresStructurePieces (pool elements), MoogsStructuresPlacements and
-# MoogsStructuresStructurePlacementType are identical on all nine branches.
+# MSL's registries are not identical across Minecraft versions: a few types exist on
+# one side of a boundary only, because they wrap (or work around) vanilla features that
+# appeared or disappeared there. Every type NOT listed here is registered identically on
+# every MSL branch (verified by diffing the modinit registries across 1.20-1.20.4,
+# 1.20.5-1.20.6, 1.21-1.21.1, 1.21.2-1.21.3, 1.21.4, 1.21.5-1.21.10, 1.21.11,
+# 26.1.0-26.1.2 and 26.2.0; only MoogsStructuresProcessors differs).
 #
-# Values are (added_dv, removed_dv) as DataVersions, reusing the named boundary
-# constants in utils.boundaries:
-#   added_dv    first DataVersion at which MSL registers the type (None = always had it)
-#   removed_dv  first DataVersion at which MSL no longer registers it (None = still has it)
+# Values are (added_dv, removed_dv): the first DataVersion MSL registers the type
+# (None = always) and the first at which it no longer does (None = still does).
 _MSL_TYPE_WINDOWS: dict[str, tuple[int | None, int | None]] = {
-    # Registered on the 1.20 line only. Dropped when MSL moved to 1.21.
-    "moogs_structures:waterlogging_fix_processor": (None, DV_1_21),
-    # Wrap trial spawners / vaults, which are 1.21 vanilla features.
+    "moogs_structures:waterlogging_fix_processor": (None, DV_1_21),      # 1.20 line only
     "moogs_structures:trial_spawner_randomizing_processor": (DV_1_21, None),
     "moogs_structures:vault_randomizing_processor": (DV_1_21, None),
 }
 
-# DataVersion -> the MC version that introduced it, for human-readable messages.
-_DV_VERSION_NAMES: dict[int, str] = {b.dv: b.first_new_version for b in BOUNDARIES.values()}
-
 _schema_cache: dict[str, dict] = {}
-
-
-def _resolve_dv_range(ctx) -> tuple[int, int] | None:
-    """(min, max) DataVersion across every MC version the repo targets, or None.
-
-    Same source of truth the other version-sensitive checks use
-    (check_entity_equipment_shape): utils.versions.load_version_map maps MC version
-    -> DataVersion, and utils.boundaries.side_of decides which side of a named
-    boundary a (min, max) range sits on.
-
-    Returns None -- meaning "do not version-gate at all" -- when the map is
-    unavailable or any targeted version is missing from it. That can only ever
-    under-report a genuinely dead type; it can never invent a false positive,
-    which is the failure mode this gating exists to remove.
-    """
-    version_map = load_version_map(_CACHE_DIR, getattr(ctx, "refresh", False))
-    if not version_map:
-        return None
-    dvs = [version_map.get(v) for v in getattr(ctx, "mc_versions", [])]
-    if not dvs or any(dv is None for dv in dvs):
-        return None
-    return min(dvs), max(dvs)
-
-
-def _dv_range_resolver(ctx):
-    """Memoised, lazy accessor for _resolve_dv_range.
-
-    Lazy on purpose: load_version_map can hit the network, and the overwhelming
-    majority of files use types that are registered on every MSL branch. The map is
-    only consulted once a type from _MSL_TYPE_WINDOWS actually turns up.
-    """
-    cached: list[tuple[int, int] | None] = []
-
-    def resolve() -> tuple[int, int] | None:
-        if not cached:
-            cached.append(_resolve_dv_range(ctx))
-        return cached[0]
-
-    return resolve
-
-
-def _is_registered(type_id: str, dv_range: tuple[int, int] | None) -> bool:
-    """True if MSL registers `type_id` on at least ONE targeted MC version.
-
-    The rule -- deliberately asymmetric -- is: a type is "unknown" only when it is
-    unknown for EVERY version the repo targets. A branch is one artifact shipped
-    across a whole MC range, and content that works anywhere in that range is
-    content the author meant to write; flagging it would be a false positive.
-    So a 1.20-1.20.6 branch stays silent about waterlogging_fix_processor (MSL
-    registers it across all of 1.20), while a 1.21+ branch is still told about it,
-    because there it really is dead data.
-    """
-    window = _MSL_TYPE_WINDOWS.get(type_id)
-    if window is None:
-        return True  # registered on every MSL branch
-    if dv_range is None:
-        return True  # version range unresolvable -- stay quiet rather than guess
-    added, removed = window
-    min_dv, max_dv = dv_range
-    if added is not None and side_of(min_dv, max_dv, added) == BoundarySide.OLD:
-        return False  # every targeted version predates the type's introduction
-    if removed is not None and side_of(min_dv, max_dv, removed) == BoundarySide.NEW:
-        return False  # every targeted version postdates the type's removal
-    return True
-
-
-def _unknown_reason(kind: str, type_id: str, in_registry: bool) -> str:
-    """Message for a rejected moogs_structures:* type id."""
-    if not in_registry:
-        return f"unknown MSL {kind} {type_id!r}"
-    added, removed = _MSL_TYPE_WINDOWS[type_id]
-    if removed is not None:
-        boundary = _DV_VERSION_NAMES.get(removed, f"DataVersion {removed}")
-        return (f"MSL {kind} {type_id!r} was removed at {boundary};"
-                f" no targeted MC version registers it")
-    boundary = _DV_VERSION_NAMES.get(added, f"DataVersion {added}")
-    return (f"MSL {kind} {type_id!r} was only added at {boundary};"
-            f" no targeted MC version registers it")
+_validator_cache: dict[int, jsonschema.Draft4Validator] = {}
 
 
 def _resolve_local_refs(node):
-    """Inline {"$ref": "<file>.json"} nodes pointing at sibling schema files."""
+    """Inline ``{"$ref": "<file>.json"}`` nodes pointing at sibling schema files."""
     if isinstance(node, dict):
         ref = node.get("$ref")
         if isinstance(ref, str) and ref.endswith(".json"):
@@ -165,16 +89,53 @@ def _resolve_local_refs(node):
 
 def _load_schema(filename: str) -> dict:
     if filename not in _schema_cache:
-        with (_SCHEMAS_DIR / filename).open() as f:
+        with (_SCHEMAS_DIR / filename).open(encoding="utf-8") as f:
             _schema_cache[filename] = _resolve_local_refs(json.load(f))
     return _schema_cache[filename]
 
 
-def _validate_against(schema: str | dict, data: dict, subdir: str, rel, where: str) -> int:
-    """Validate data against a type-specific schema; print and count errors."""
-    if isinstance(schema, str):
-        schema = _load_schema(schema)
-    validator = jsonschema.Draft4Validator(schema)
+def _validator_for(schema: dict) -> jsonschema.Draft4Validator:
+    """One compiled validator per schema object (they are all module-level singletons)."""
+    v = _validator_cache.get(id(schema))
+    if v is None:
+        v = jsonschema.Draft4Validator(schema)
+        _validator_cache[id(schema)] = v
+    return v
+
+
+def _is_registered(type_id: str, dv_range: tuple[int, int] | None) -> bool:
+    """True if MSL registers ``type_id`` on at least ONE targeted MC version.
+
+    Deliberately asymmetric: a type is unknown only when it is unknown for EVERY
+    targeted version. A branch is one artifact shipped across a whole MC range,
+    and content that works anywhere in that range is content the author meant.
+    """
+    window = _MSL_TYPE_WINDOWS.get(type_id)
+    if window is None or dv_range is None:
+        return True  # registered everywhere, or range unresolvable: stay quiet
+    added, removed = window
+    min_dv, max_dv = dv_range
+    if added is not None and side_of(min_dv, max_dv, added) == BoundarySide.OLD:
+        return False
+    if removed is not None and side_of(min_dv, max_dv, removed) == BoundarySide.NEW:
+        return False
+    return True
+
+
+def _unknown_reason(kind: str, type_id: str, in_registry: bool) -> str:
+    if not in_registry:
+        return f"unknown MSL {kind} {type_id!r}"
+    added, removed = _MSL_TYPE_WINDOWS[type_id]
+    if removed is not None:
+        boundary = DV_VERSION_NAMES.get(removed, f"DataVersion {removed}")
+        return (f"MSL {kind} {type_id!r} was removed at {boundary};"
+                f" no targeted MC version registers it")
+    boundary = DV_VERSION_NAMES.get(added, f"DataVersion {added}")
+    return (f"MSL {kind} {type_id!r} was only added at {boundary};"
+            f" no targeted MC version registers it")
+
+
+def _print_errors(validator: jsonschema.Draft4Validator, data, subdir: str, rel, where: str) -> int:
     errors = sorted(validator.iter_errors(data), key=lambda e: list(e.path))
     for error in errors:
         path_str = " > ".join(str(p) for p in error.absolute_path) if error.absolute_path else where
@@ -183,9 +144,14 @@ def _validate_against(schema: str | dict, data: dict, subdir: str, rel, where: s
     return len(errors)
 
 
+def _validate_against(schema: str | dict, data, subdir: str, rel, where: str) -> int:
+    if isinstance(schema, str):
+        schema = _load_schema(schema)
+    return _print_errors(_validator_for(schema), data, subdir, rel, where)
+
+
 def _iter_pool_elements(data: dict):
-    """Yield (index_path, element_dict) for every element in a template pool,
-    recursing into list_pool_element nesting."""
+    """``(index_path, element)`` for every element, recursing into list_pool_element."""
     def walk(elements, prefix):
         for i, entry in enumerate(elements):
             if not isinstance(entry, dict):
@@ -203,16 +169,27 @@ def _iter_pool_elements(data: dict):
         yield from walk(elements, "")
 
 
+def _check_y_allowance(rel, stype: str, data: dict) -> int:
+    allowance = data.get("y_allowance")
+    if not isinstance(allowance, dict):
+        return 0
+    min_y = allowance.get("min_y_allowed")
+    max_y = allowance.get("max_y_allowed")
+    if isinstance(min_y, int) and isinstance(max_y, int) and max_y < min_y:
+        print(f"  [structure] {rel} @ y_allowance")
+        print(f"    max_y_allowed {max_y} is less than min_y_allowed {min_y}")
+        return 1
+    if max_y is not None and min_y is None and stype == _CRASHING_Y_ALLOWANCE_TYPE:
+        print(f"  [structure] {rel} @ y_allowance")
+        print(f"    max_y_allowed {max_y} is set with no min_y_allowed;"
+              f" this crashes chunk generation")
+        print(f"    add min_y_allowed (the dimension floor, e.g. -64,"
+              f" preserves current behaviour)")
+        return 1
+    return 0
+
+
 def _check_msl_types(subdir: str, rel, data: dict, dv_range) -> int:
-    """Apply MSL type-specific schemas on top of the base schema pass.
-
-    Unknown moogs_structures:* type ids are flagged (typo catcher): the game
-    silently falls back or hard-fails on these, so they never work as intended.
-
-    `dv_range` is the memoised resolver from _dv_range_resolver; a known type is
-    only rejected when MSL registers it on none of the repo's target versions
-    (see _is_registered).
-    """
     errors = 0
 
     if subdir == "structure":
@@ -225,31 +202,7 @@ def _check_msl_types(subdir: str, rel, data: dict, dv_range) -> int:
                 errors += 1
             else:
                 errors += _validate_against(schema_file, data, subdir, rel, "(root)")
-                # MSL throws at datapack load when max_y_allowed < min_y_allowed;
-                # json schema can't compare fields, so check it here.
-                allowance = data.get("y_allowance")
-                if isinstance(allowance, dict):
-                    min_y = allowance.get("min_y_allowed")
-                    max_y = allowance.get("max_y_allowed")
-                    if isinstance(min_y, int) and isinstance(max_y, int) and max_y < min_y:
-                        print(f"  [{subdir}] {rel} @ y_allowance")
-                        print(f"    max_y_allowed {max_y} is less than min_y_allowed {min_y}")
-                        errors += 1
-                    # A max with no min is a hard chunkgen crash, not a config nicety.
-                    # GenericJigsawStructure.offsetToNewHeight guards the branch on
-                    # maxYAllowed.isPresent() and then calls minYAllowed.get() inside it,
-                    # so the Optional is unwrapped empty and throws NoSuchElementException
-                    # the first time worldgen tries to place the structure. The branch
-                    # below it guards minYAllowed correctly, which is why a min with no
-                    # max is fine. The nether subclass overrides postLayoutAdjustments
-                    # and never reaches offsetToNewHeight, so it is unaffected.
-                    elif max_y is not None and min_y is None and stype == _CRASHING_Y_ALLOWANCE_TYPE:
-                        print(f"  [{subdir}] {rel} @ y_allowance")
-                        print(f"    max_y_allowed {max_y} is set with no min_y_allowed;"
-                              f" this crashes chunk generation")
-                        print(f"    add min_y_allowed (the dimension floor, e.g. -64,"
-                              f" preserves current behaviour)")
-                        errors += 1
+                errors += _check_y_allowance(rel, stype, data)
 
     elif subdir == "template_pool":
         for where, element in _iter_pool_elements(data):
@@ -297,49 +250,50 @@ def _check_msl_types(subdir: str, rel, data: dict, dv_range) -> int:
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
+    svc = services(ctx)
+    project = svc.project
+
+    # Lazy: the version map may need the network, and most files only use types
+    # registered on every MSL branch. Resolved on first use, at most once.
+    resolved: list[tuple[int, int] | None] = []
+
+    def dv_range() -> tuple[int, int] | None:
+        if not resolved:
+            index = svc.versions
+            resolved.append(index.dv_range(list(ctx.mc_versions)) if index else None)
+        return resolved[0]
 
     failed = False
     error_count = 0
     counts: dict[str, int] = {}
-    dv_range = _dv_range_resolver(ctx)
 
     for subdir, schema_file in _SUBDIRS:
-        worldgen_dir = namespace_root / "worldgen" / subdir
+        worldgen_dir = project.namespace_root / "worldgen" / subdir
         if not worldgen_dir.exists():
             continue
 
         schema = _load_schema(schema_file)
         if subdir == "template_pool":
-            schema = schemas.patcher.apply_msl(schema)
+            schema = _patched_pool_schema()
+        validator = _validator_for(schema)
 
-        validator = jsonschema.Draft4Validator(schema)
-
-        files = sorted(worldgen_dir.rglob("*.json"))
+        files = project.json_files(worldgen_dir)
         counts[subdir] = len(files)
 
         for json_path in files:
             rel = json_path.relative_to(worldgen_dir)
             try:
-                with json_path.open(encoding="utf-8-sig") as f:
-                    data = json.load(f)
+                data = project.load_json(json_path)
             except json.JSONDecodeError as e:
                 print(f"  [{subdir}] {rel} — invalid JSON: {e}")
                 error_count += 1
                 failed = True
                 continue
 
-            errors = sorted(validator.iter_errors(data), key=lambda e: list(e.path))
-            for error in errors:
-                path_str = " > ".join(str(p) for p in error.absolute_path) if error.absolute_path else "(root)"
-                print(f"  [{subdir}] {rel} @ {path_str}")
-                print(f"    {error.message}")
-                error_count += 1
-                failed = True
-
-            msl_errors = _check_msl_types(subdir, rel, data, dv_range)
-            if msl_errors:
-                error_count += msl_errors
+            n = _print_errors(validator, data, subdir, rel, "(root)")
+            n += _check_msl_types(subdir, rel, data, dv_range)
+            if n:
+                error_count += n
                 failed = True
 
     total = sum(counts.values())
@@ -354,3 +308,12 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
     summary = f"{total} files, 0 errors" if error_count == 0 else f"{total} files, {error_count} error(s)"
     return not failed, summary
+
+
+_patched_pool: list[dict] = []
+
+
+def _patched_pool_schema() -> dict:
+    if not _patched_pool:
+        _patched_pool.append(schemas.patcher.apply_msl(_load_schema("template_pool.json")))
+    return _patched_pool[0]

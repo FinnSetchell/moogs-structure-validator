@@ -1,148 +1,119 @@
+"""The reference chain between pools, structure files, worldgen structures and
+structure sets, in both directions:
+
+1. every location a template pool names exists on disk;
+2. every structure file on disk is named by some pool (orphans warn);
+3. every worldgen structure's ``start_pool`` exists;
+4. every structure a structure_set names exists;
+5. every worldgen structure is placed by something -- a structure_set in any
+   namespace, or an MSL ``replace_vanilla`` replacement (a structure nothing
+   places can never generate, and the failure is silent);
+6. every pool ``fallback`` in our namespace exists;
+7. MSL pool elements use ``element_type`` rather than ``type``.
+"""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from utils import replace_vanilla
-from utils.paths import data_dir as _data_dir
+from core import replace_vanilla
+from core.context import services
+from core.project import Project, loc_to_path, pool_locations
 
 if TYPE_CHECKING:
-    from validator import ValidatorContext
+    from core.context import ValidatorContext
 
 
-def _loc_to_path(location: str, namespace: str, base_dir: Path, ext: str) -> Path | None:
-    if ":" not in location:
-        return None
-    ns, path = location.split(":", 1)
-    if ns != namespace:
-        return None
-    return base_dir / (path + ext)
+def _read(project: Project, path: Path) -> dict | None:
+    return project.json_or_report(
+        path, lambda e: print(f"  [ERROR] Could not read {path.name}: {e}")
+    )
 
 
-def _load_json(path: Path) -> dict | None:
-    try:
-        with path.open(encoding="utf-8-sig") as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"  [ERROR] Could not read {path.name}: {e}")
-        return None
-
-
-def _collect_pool_locations(pool_data: dict) -> list[str]:
-    locations = []
-    for entry in pool_data.get("elements", []):
-        element = entry.get("element", {})
-        loc = element.get("location")
-        if loc:
-            locations.append(loc)
-        el_type = element.get("element_type") or element.get("type", "")
-        if el_type == "moogs_structures:versioned_single_pool_element":
-            for versioned_loc in element.get("locations", {}).values():
-                locations.append(versioned_loc)
-    return locations
-
-
-def _check_pool_to_nbt(
-    template_pool_dir: Path, structures_dir: Path, namespace: str
-) -> list[str]:
+def _check_pool_to_nbt(project: Project) -> list[str]:
     errors = []
-    for json_path in sorted(template_pool_dir.rglob("*.json")):
-        data = _load_json(json_path)
+    pool_dir, structures_dir, ns = project.template_pool_dir, project.structures_dir, project.namespace
+    for json_path in project.json_files(pool_dir):
+        data = _read(project, json_path)
         if data is None:
             continue
-        pool_rel = json_path.relative_to(template_pool_dir)
-        for loc in _collect_pool_locations(data):
-            nbt_path = _loc_to_path(loc, namespace, structures_dir, ".nbt")
-            if nbt_path is None:
-                continue
-            if not nbt_path.exists():
+        pool_rel = json_path.relative_to(pool_dir)
+        for loc in pool_locations(data):
+            nbt_path = loc_to_path(loc, ns, structures_dir, ".nbt")
+            if nbt_path is not None and not nbt_path.exists():
                 errors.append(f"{pool_rel}  ->  {loc}  (no matching .nbt)")
     return errors
 
 
-def _check_orphaned_nbt(
-    template_pool_dir: Path, structures_dir: Path, namespace: str
-) -> list[str]:
+def _check_orphaned_nbt(project: Project) -> list[str]:
+    """Structure files (relative paths) that no template pool references."""
     referenced: set[Path] = set()
-    for json_path in sorted(template_pool_dir.rglob("*.json")):
-        data = _load_json(json_path)
+    structures_dir, ns = project.structures_dir, project.namespace
+    for json_path in project.json_files(project.template_pool_dir):
+        data = _read(project, json_path)
         if data is None:
             continue
-        for loc in _collect_pool_locations(data):
-            nbt_path = _loc_to_path(loc, namespace, structures_dir, ".nbt")
+        for loc in pool_locations(data):
+            nbt_path = loc_to_path(loc, ns, structures_dir, ".nbt")
             if nbt_path:
                 referenced.add(nbt_path.resolve())
+    return [
+        str(nbt_path.relative_to(structures_dir))
+        for nbt_path in project.nbt_files(structures_dir)
+        if nbt_path.resolve() not in referenced
+    ]
 
-    orphans = []
-    for nbt_path in sorted(structures_dir.rglob("*.nbt")):
-        if nbt_path.resolve() not in referenced:
-            orphans.append(str(nbt_path.relative_to(structures_dir)))
-    return orphans
 
-
-def _check_structure_to_pool(
-    worldgen_structure_dir: Path, template_pool_dir: Path, namespace: str
-) -> list[str]:
+def _check_structure_to_pool(project: Project) -> list[str]:
     errors = []
-    for json_path in sorted(worldgen_structure_dir.rglob("*.json")):
-        data = _load_json(json_path)
+    structure_dir, pool_dir, ns = project.worldgen_structure_dir, project.template_pool_dir, project.namespace
+    for json_path in project.json_files(structure_dir):
+        data = _read(project, json_path)
         if data is None:
             continue
         start_pool = data.get("start_pool")
         if not start_pool:
             continue
-        pool_path = _loc_to_path(start_pool, namespace, template_pool_dir, ".json")
-        if pool_path is None:
-            continue
-        if not pool_path.exists():
-            rel = json_path.relative_to(worldgen_structure_dir)
-            errors.append(f"{rel}  ->  {start_pool}  (pool not found)")
+        pool_path = loc_to_path(start_pool, ns, pool_dir, ".json")
+        if pool_path is not None and not pool_path.exists():
+            errors.append(f"{json_path.relative_to(structure_dir)}  ->  {start_pool}  (pool not found)")
     return errors
 
 
-def _check_set_to_structure(
-    structure_set_dir: Path, worldgen_structure_dir: Path, namespace: str
-) -> list[str]:
+def _check_set_to_structure(project: Project) -> list[str]:
     errors = []
-    for json_path in sorted(structure_set_dir.rglob("*.json")):
-        data = _load_json(json_path)
+    set_dir, structure_dir, ns = project.structure_set_dir, project.worldgen_structure_dir, project.namespace
+    for json_path in project.json_files(set_dir):
+        data = _read(project, json_path)
         if data is None:
             continue
-        rel = json_path.relative_to(structure_set_dir)
+        rel = json_path.relative_to(set_dir)
         for entry in data.get("structures", []):
             structure_loc = entry.get("structure", "")
-            struct_path = _loc_to_path(structure_loc, namespace, worldgen_structure_dir, ".json")
-            if struct_path is None:
-                continue
-            if not struct_path.exists():
+            struct_path = loc_to_path(structure_loc, ns, structure_dir, ".json")
+            if struct_path is not None and not struct_path.exists():
                 errors.append(f"{rel}  ->  {structure_loc}  (worldgen structure not found)")
     return errors
 
 
 def _check_structure_placed(
-    worldgen_structure_dir: Path, data_root: Path, namespace_root: Path, namespace: str
+    worldgen_structure_dir: Path, data_root: Path, namespace_root: Path, namespace: str,
+    project: Project | None = None,
 ) -> list[str]:
-    """The reverse of _check_set_to_structure: every structure must be placed by something.
+    """Every worldgen structure must be placed by something.
 
-    A `worldgen/structure/*.json` that no `structure_set` names can never generate --
-    nothing ever asks the game to look for it, and the failure is silent. It surfaces
-    only as `could_not_locate` in a runtime sweep.
-
-    Two things count as placing a structure:
-
-      - an entry in any `worldgen/structure_set/*.json`. Every namespace under `data/`
-        is scanned, not just the mod's own, because a pack may override a vanilla set
-        (`data/minecraft/worldgen/structure_set/...`) to slot its structure into it;
-      - being named as a `replacement_structure` in an MSL `replace_vanilla.json`
-        preset. MSL swaps it in for the vanilla structure it replaces, so it generates
-        through that structure's set and needs none of its own.
+    Two things count: an entry in any ``worldgen/structure_set`` under ``data/``
+    (every namespace, since a pack may override a vanilla set to slot its
+    structure in), or being a ``replacement_structure`` in an MSL
+    ``replace_vanilla.json`` preset (it generates through the vanilla set).
     """
+    if project is None:
+        project = Project(data_root.parents[3], namespace)
     placed: set[str] = set()
 
     for set_dir in sorted(data_root.glob("*/worldgen/structure_set")):
-        for json_path in sorted(set_dir.rglob("*.json")):
-            data = _load_json(json_path)
+        for json_path in project.json_files(set_dir):
+            data = _read(project, json_path)
             if data is None:
                 continue
             for entry in data.get("structures", []):
@@ -150,7 +121,7 @@ def _check_structure_placed(
                 if isinstance(loc, str) and loc:
                     placed.add(loc if ":" in loc else f"minecraft:{loc}")
 
-    manifest = replace_vanilla.load(namespace_root)
+    manifest = replace_vanilla.load(project)
     if manifest is not None:
         for replacement in manifest.replacements:
             loc = replacement.replacement_structure
@@ -158,7 +129,7 @@ def _check_structure_placed(
                 placed.add(loc if ":" in loc else f"minecraft:{loc}")
 
     errors = []
-    for json_path in sorted(worldgen_structure_dir.rglob("*.json")):
+    for json_path in project.json_files(worldgen_structure_dir):
         rel = json_path.relative_to(worldgen_structure_dir).with_suffix("").as_posix()
         if f"{namespace}:{rel}" not in placed:
             errors.append(
@@ -168,37 +139,33 @@ def _check_structure_placed(
     return errors
 
 
-def _check_pool_fallbacks(ctx: ValidatorContext, namespace_root: Path) -> list[str]:
-    template_pool_dir = namespace_root / "worldgen" / "template_pool"
-    if not template_pool_dir.exists():
+def _check_pool_fallbacks(project: Project) -> list[str]:
+    pool_dir = project.template_pool_dir
+    if not pool_dir.exists():
         return []
     errors = []
-    for json_path in sorted(template_pool_dir.rglob("*.json")):
-        data = _load_json(json_path)
+    for json_path in project.json_files(pool_dir):
+        data = _read(project, json_path)
         if data is None:
             continue
         fallback = data.get("fallback")
         if not isinstance(fallback, str) or ":" not in fallback:
             continue
         fallback_ns, fallback_path = fallback.split(":", 1)
-        if fallback_ns == "minecraft":
+        if fallback_ns != project.namespace:
             continue
-        if fallback_ns != ctx.namespace:
-            continue
-        expected = template_pool_dir / (fallback_path + ".json")
-        if not expected.exists():
-            rel = json_path.relative_to(template_pool_dir)
-            errors.append(f"{rel}  ->  fallback '{fallback}'  (pool not found)")
+        if not (pool_dir / (fallback_path + ".json")).exists():
+            errors.append(f"{json_path.relative_to(pool_dir)}  ->  fallback '{fallback}'  (pool not found)")
     return errors
 
 
-def _check_msl_element_key(ctx: ValidatorContext, namespace_root: Path) -> list[str]:
-    template_pool_dir = namespace_root / "worldgen" / "template_pool"
-    if not template_pool_dir.exists():
+def _check_msl_element_key(project: Project) -> list[str]:
+    pool_dir = project.template_pool_dir
+    if not pool_dir.exists():
         return []
     errors = []
-    for file in sorted(template_pool_dir.rglob("*.json")):
-        data = _load_json(file)
+    for file in project.json_files(pool_dir):
+        data = _read(project, file)
         if data is None:
             continue
         for entry in data.get("elements", []):
@@ -211,91 +178,43 @@ def _check_msl_element_key(ctx: ValidatorContext, namespace_root: Path) -> list[
     return errors
 
 
-def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-    structures_dir = _data_dir(namespace_root, "structure")
-    template_pool_dir = namespace_root / "worldgen" / "template_pool"
-    worldgen_structure_dir = namespace_root / "worldgen" / "structure"
-    structure_set_dir = namespace_root / "worldgen" / "structure_set"
+def _report(step: str, label: str, errors: list[str], noun: str, indent: str = "          ") -> bool:
+    if errors:
+        print(f"  {step} {label}{len(errors)} {noun}:")
+        for e in errors:
+            print(f"{indent}{e}" if indent else e)
+        return True
+    print(f"  {step} {label}OK")
+    return False
 
-    for d in [structures_dir, template_pool_dir, worldgen_structure_dir, structure_set_dir]:
+
+def run(ctx: ValidatorContext) -> tuple[bool, str]:
+    project = services(ctx).project
+
+    for d in [project.structures_dir, project.template_pool_dir,
+              project.worldgen_structure_dir, project.structure_set_dir]:
         if not d.exists():
             print(f"  directory not found: {d}")
             return False, "required directory missing"
 
     failed = False
-    orphan_count = 0
+    failed |= _report("[1/7]", "Pool -> NBT        ", _check_pool_to_nbt(project), "missing")
 
-    errors = _check_pool_to_nbt(template_pool_dir, structures_dir, ctx.namespace)
-    if errors:
-        print(f"  [1/7] Pool -> NBT        {len(errors)} missing:")
-        for e in errors:
-            print(f"          {e}")
-        failed = True
-    else:
-        print(f"  [1/7] Pool -> NBT        OK")
+    orphans = _check_orphaned_nbt(project)
+    _report("[2/7]", "Orphaned NBT       ", orphans, "unreferenced")
 
-    orphans = _check_orphaned_nbt(template_pool_dir, structures_dir, ctx.namespace)
-    orphan_count = len(orphans)
-    if orphans:
-        print(f"  [2/7] Orphaned NBT       {orphan_count} unreferenced:")
-        for o in orphans:
-            print(f"          {o}")
-    else:
-        print(f"  [2/7] Orphaned NBT       OK")
-
-    errors = _check_structure_to_pool(worldgen_structure_dir, template_pool_dir, ctx.namespace)
-    if errors:
-        print(f"  [3/7] Structure -> Pool  {len(errors)} missing:")
-        for e in errors:
-            print(f"          {e}")
-        failed = True
-    else:
-        print(f"  [3/7] Structure -> Pool  OK")
-
-    errors = _check_set_to_structure(structure_set_dir, worldgen_structure_dir, ctx.namespace)
-    if errors:
-        print(f"  [4/7] Set -> Structure   {len(errors)} missing:")
-        for e in errors:
-            print(f"          {e}")
-        failed = True
-    else:
-        print(f"  [4/7] Set -> Structure   OK")
-
-    errors = _check_structure_placed(
-        worldgen_structure_dir, namespace_root.parent, namespace_root, ctx.namespace
-    )
-    if errors:
-        print(f"  [5/7] Structure -> Set   {len(errors)} unplaced:")
-        for e in errors:
-            print(f"          {e}")
-        failed = True
-    else:
-        print(f"  [5/7] Structure -> Set   OK")
-
-    fallback_errors = _check_pool_fallbacks(ctx, namespace_root)
-    if fallback_errors:
-        print(f"  [6/7] Pool fallbacks     {len(fallback_errors)} missing:")
-        for e in fallback_errors:
-            print(f"          {e}")
-        failed = True
-    else:
-        print(f"  [6/7] Pool fallbacks     OK")
-
-    msl_key_errors = _check_msl_element_key(ctx, namespace_root)
-    if msl_key_errors:
-        print(f"  [7/7] MSL element keys   {len(msl_key_errors)} bad:")
-        for e in msl_key_errors:
-            print(e)
-        failed = True
-    else:
-        print(f"  [7/7] MSL element keys   OK")
+    failed |= _report("[3/7]", "Structure -> Pool  ", _check_structure_to_pool(project), "missing")
+    failed |= _report("[4/7]", "Set -> Structure   ", _check_set_to_structure(project), "missing")
+    failed |= _report("[5/7]", "Structure -> Set   ", _check_structure_placed(
+        project.worldgen_structure_dir, project.data_root, project.namespace_root, project.namespace, project,
+    ), "unplaced")
+    failed |= _report("[6/7]", "Pool fallbacks     ", _check_pool_fallbacks(project), "missing")
+    failed |= _report("[7/7]", "MSL element keys   ", _check_msl_element_key(project), "bad", indent="")
 
     if failed:
         summary = "cross-reference errors found"
-    elif orphan_count:
-        summary = f"all cross-references OK  ({orphan_count} orphan warning)"
+    elif orphans:
+        summary = f"all cross-references OK  ({len(orphans)} orphan warning)"
     else:
         summary = "all cross-references OK"
-
     return not failed, summary

@@ -533,7 +533,8 @@ def test_unknown_processor_type_still_fails_on_1_20_repo(tmp_path, monkeypatch):
 def test_version_gating_is_silent_without_a_version_map(tmp_path, monkeypatch):
     # No version map (offline, or an unrecognised target version) => never gate,
     # because a wrong guess here is exactly the false positive being fixed.
-    monkeypatch.setattr(mod, "load_version_map", lambda cache_dir, refresh: {})
+    from core import mcmeta as _mcmeta
+    monkeypatch.setattr(_mcmeta, "fetch_version_entries", lambda cache_dir, refresh: [])
     _write(tmp_path, "test", "processor_list", "p.json", _processor_list([_WATERLOGGING]))
     passed, summary = mod.run(FakeContext("test", _MC_1_21, tmp_path))
     assert passed, summary

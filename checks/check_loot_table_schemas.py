@@ -1,10 +1,15 @@
+"""Each ``loot_table/*.json`` validates against misode's loot table JSON schema.
+
+The schema is fetched from misode/minecraft-json-schemas (with its ``$ref``
+targets) and cached. It is then loosened where it is stricter than the game:
+extra top-level keys, numeric or provider ``rolls``, any entry ``type``, and
+functions validated only for having a ``function`` id -- the game accepts all
+of these, and the point here is malformed structure, not exhaustive typing.
+"""
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
-import urllib.request
-from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin
 
@@ -12,18 +17,15 @@ import jsonschema
 import referencing
 import referencing.jsonschema
 
-from utils.paths import data_dir
+from core import mcmeta
+from core.context import services
 
 if TYPE_CHECKING:
-    from validator import ValidatorContext
-
-
-_SCHEMA_URL = "https://raw.githubusercontent.com/misode/minecraft-json-schemas/master/java/data/loot_table.json"
-_CACHE_FILE = Path(__file__).parent.parent / "cache" / "schema-loot_table.json"
-_REFS_CACHE_DIR = Path(__file__).parent.parent / "cache" / "schema-refs"
+    from core.context import ValidatorContext
 
 
 def resolve_refs(node: object, base_url: str) -> object:
+    """Make every relative ``$ref`` absolute against the schema's own URL."""
     if isinstance(node, dict):
         out = {}
         for k, v in node.items():
@@ -32,7 +34,7 @@ def resolve_refs(node: object, base_url: str) -> object:
             else:
                 out[k] = resolve_refs(v, base_url)
         return out
-    elif isinstance(node, list):
+    if isinstance(node, list):
         return [resolve_refs(item, base_url) for item in node]
     return node
 
@@ -45,11 +47,7 @@ def patch_schema(schema: dict) -> dict:
     props.setdefault("type", {"type": "string"})
     props.setdefault("random_sequence", {"type": "string"})
 
-    pools_items = (
-        s.get("properties", {})
-        .get("pools", {})
-        .get("items", {})
-    )
+    pools_items = s.get("properties", {}).get("pools", {}).get("items", {})
     if pools_items:
         pools_items.pop("additionalProperties", None)
         dist = {"oneOf": [{"type": ["number", "integer"]}, {"type": "object"}]}
@@ -84,75 +82,48 @@ def patch_schema(schema: dict) -> dict:
             "required": ["function"],
             "properties": {"function": {"type": "string"}},
         }
-
     return s
 
 
-def make_retriever(cache_dir: Path, refresh: bool):
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
-    def retriever(uri: str):
-        key = hashlib.md5(uri.encode()).hexdigest()
-        cache_file = cache_dir / key
-        if cache_file.exists() and not refresh:
-            with cache_file.open() as f:
-                contents = json.load(f)
-        else:
-            with urllib.request.urlopen(uri) as resp:
-                contents = json.loads(resp.read().decode())
-            with cache_file.open("w") as f:
-                json.dump(contents, f)
+def _retriever(cache_dir, refresh: bool):
+    def retrieve(uri: str):
         return referencing.Resource.from_contents(
-            contents,
+            mcmeta.fetch_schema_ref(uri, cache_dir, refresh),
             default_specification=referencing.jsonschema.DRAFT4,
         )
-
-    return retriever
+    return retrieve
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-    loot_table_dir = data_dir(namespace_root, "loot_table")
+    svc = services(ctx)
+    project = svc.project
+    loot_table_dir = project.loot_table_dir
 
     if not loot_table_dir.exists():
         print("  no loot table directory — skipped")
         return True, "skipped (no loot tables)"
 
-    files = sorted(loot_table_dir.rglob("*.json"))
+    files = project.json_files(loot_table_dir)
     if not files:
         print("  no loot table files found")
         return True, "0 files"
 
-    if _CACHE_FILE.exists() and not ctx.refresh:
-        with _CACHE_FILE.open() as f:
-            schema = json.load(f)
-    else:
-        print("  fetching schema...")
-        with urllib.request.urlopen(_SCHEMA_URL) as resp:
-            schema = json.loads(resp.read().decode())
-        _CACHE_FILE.parent.mkdir(exist_ok=True)
-        with _CACHE_FILE.open("w") as f:
-            json.dump(schema, f)
-
-    schema = resolve_refs(schema, _SCHEMA_URL)
-    schema = patch_schema(schema)
-
-    registry = referencing.Registry(retrieve=make_retriever(_REFS_CACHE_DIR, ctx.refresh))
+    schema = mcmeta.fetch_loot_table_schema(svc.mcmeta.cache_dir, svc.refresh)
+    schema = patch_schema(resolve_refs(schema, mcmeta.LOOT_SCHEMA_URL))
+    registry = referencing.Registry(retrieve=_retriever(svc.mcmeta.cache_dir, svc.refresh))
     validator = jsonschema.Draft4Validator(schema, registry=registry)
 
     error_count = 0
     for json_path in files:
         rel = json_path.relative_to(loot_table_dir)
         try:
-            with json_path.open(encoding="utf-8-sig") as f:
-                data = json.load(f)
+            data = project.load_json(json_path)
         except json.JSONDecodeError as e:
             print(f"  {rel} — invalid JSON: {e}")
             error_count += 1
             continue
 
-        errors = sorted(validator.iter_errors(data), key=lambda e: list(e.path))
-        for error in errors:
+        for error in sorted(validator.iter_errors(data), key=lambda e: list(e.path)):
             path_str = " > ".join(str(p) for p in error.absolute_path) if error.absolute_path else "(root)"
             print(f"  {rel} @ {path_str}")
             print(f"    {error.message}")

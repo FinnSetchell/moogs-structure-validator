@@ -1,17 +1,21 @@
+"""Containers carry loot (warn-only).
+
+Chests, trapped chests, barrels, all shulker boxes, dispensers and droppers are
+expected to hold a ``LootTable``. An empty container warns (barrels and hoppers
+excepted: they fill from the world), and hardcoded ``Items`` without a loot
+table warn (dispensers, droppers and hoppers excepted: their contents are
+deliberate).
+"""
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-import nbtlib
-
-from utils.nbt_cache import load_nbt
-from utils.paths import data_dir
+from core.context import services
 
 if TYPE_CHECKING:
-    from validator import ValidatorContext
+    from core.context import ValidatorContext
 
-_SHULKER_BOXES = {
+SHULKER_BOXES = {
     "minecraft:shulker_box",
     "minecraft:white_shulker_box",
     "minecraft:orange_shulker_box",
@@ -31,75 +35,54 @@ _SHULKER_BOXES = {
     "minecraft:black_shulker_box",
 }
 
-_CONTAINER_BLOCKS = {
+CONTAINER_BLOCKS = {
     "minecraft:chest",
     "minecraft:trapped_chest",
     "minecraft:barrel",
     "minecraft:hopper",
     "minecraft:dispenser",
     "minecraft:dropper",
-    *_SHULKER_BOXES,
+    *SHULKER_BOXES,
 }
+_CONTAINER_BLOCKS = CONTAINER_BLOCKS
 
-# Having no items is normal for these (they fill dynamically or are decorative)
-_NO_EMPTY_WARN = {
-    "minecraft:barrel",
-    "minecraft:hopper",
-}
+# Having no items is normal for these (they fill dynamically or are decorative).
+_NO_EMPTY_WARN = {"minecraft:barrel", "minecraft:hopper"}
 
-# Having hardcoded items is intentional for these (they dispense/drop specific items)
-_NO_HARDCODED_WARN = {
-    "minecraft:hopper",
-    "minecraft:dispenser",
-    "minecraft:dropper",
-}
+# Hardcoded items are intentional for these.
+_NO_HARDCODED_WARN = {"minecraft:hopper", "minecraft:dispenser", "minecraft:dropper"}
+
+
+def format_pos(pos: tuple[int, int, int] | None) -> str:
+    return f"({', '.join(str(int(x)) for x in pos)})" if pos is not None else "(?)"
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-    structure_dir = data_dir(namespace_root, "structure")
-
-    if not structure_dir.exists():
+    store = services(ctx).structures
+    if not store.dir.exists():
         return True, "no structures directory"
 
     empty: list[str] = []
     hardcoded: list[str] = []
 
-    for nbt_path in sorted(structure_dir.rglob("*.nbt")):
-        if nbt_path.resolve() in ctx.orphan_nbts:
-            continue
+    for nbt_path in store.checked_files():
         try:
-            nbt = load_nbt(ctx, nbt_path)
+            structure = store.load(nbt_path)
         except Exception:
             continue
-
-        palette = nbt.get("palette")
-        blocks = nbt.get("blocks")
-        if palette is None or blocks is None:
+        if structure.palette is None:
             continue
 
-        rel = str(nbt_path.relative_to(structure_dir))
-
-        container_indices: dict[int, str] = {}
-        for i, state in enumerate(palette):
-            name = str(state.get("Name", ""))
-            if name in _CONTAINER_BLOCKS:
-                container_indices[i] = name
-
+        rel = store.rel(nbt_path)
+        names = structure.palette_names()
+        container_indices = {i: name for i, name in enumerate(names) if name in CONTAINER_BLOCKS}
         if not container_indices:
             continue
 
-        for block in blocks:
-            state_idx = int(block.get("state", -1))
-            if state_idx not in container_indices:
-                continue
+        for _, state, pos, block_nbt in structure.blocks_in_states(container_indices):
+            block_name = container_indices[state]
+            label = f"{rel} @ {format_pos(pos)} [{block_name}]"
 
-            block_name = container_indices[state_idx]
-            pos_tag = block.get("pos")
-            pos = f"({', '.join(str(int(x)) for x in pos_tag)})" if pos_tag is not None else "(?)"
-            label = f"{rel} @ {pos} [{block_name}]"
-
-            block_nbt = block.get("nbt")
             if block_nbt is None:
                 if block_name not in _NO_EMPTY_WARN:
                     empty.append(label)
@@ -127,6 +110,4 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         parts.append(f"{len(empty)} empty")
     if hardcoded:
         parts.append(f"{len(hardcoded)} hardcoded")
-    summary = ", ".join(parts) if parts else "all containers valid"
-
-    return True, summary
+    return True, ", ".join(parts) if parts else "all containers valid"

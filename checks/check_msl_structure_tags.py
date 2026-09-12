@@ -1,25 +1,25 @@
-"""Validates MSL structure tag files a consuming mod ships under
-data/moogs_structures/tags/worldgen/structure/.
+"""MSL structure tag files under ``data/moogs_structures/tags/worldgen/structure/``.
 
-MSL defines three structure tags: no_basalt and no_delta suppress nether
-basalt columns and delta lava inside tagged structures, larger_locate_search
-widens the /locate radius. A tag file with any other name does nothing, so
-unknown names are flagged as likely typos. Structure ids in the project's
-own namespace must resolve to a structure JSON.
+MSL defines three tags: ``no_basalt`` and ``no_delta`` suppress nether basalt
+columns and delta lava inside tagged structures; ``larger_locate_search``
+widens the ``/locate`` radius. A tag file with any other name does nothing, so
+unknown names are flagged as likely typos. Structure ids in the project's own
+namespace must resolve to a structure JSON.
 """
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
+from core.context import services
+
 if TYPE_CHECKING:
-    from validator import ValidatorContext
+    from core.context import ValidatorContext
 
 _KNOWN_TAGS = {"no_basalt", "no_delta", "larger_locate_search"}
 
 
 def _iter_values(values: list) -> list[tuple[str, object]]:
-    """Yield (id, raw entry) for each tag value, handling the object form."""
+    """``(id, raw entry)`` for each tag value, handling the object form."""
     out = []
     for entry in values:
         if isinstance(entry, str):
@@ -32,19 +32,14 @@ def _iter_values(values: list) -> list[tuple[str, object]]:
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    tags_dir = (ctx.project_root / "src" / "main" / "resources" / "data"
-                / "moogs_structures" / "tags" / "worldgen" / "structure")
+    project = services(ctx).project
+    tags_dir = project.data_root / "moogs_structures" / "tags" / "worldgen" / "structure"
 
-    if not tags_dir.exists():
-        return True, "no msl structure tags"
-
-    files = sorted(tags_dir.rglob("*.json"))
+    files = project.json_files(tags_dir)
     if not files:
         return True, "no msl structure tags"
 
-    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
     bad: list[str] = []
-
     for json_path in files:
         rel = json_path.relative_to(tags_dir)
         tag_name = rel.with_suffix("").as_posix()
@@ -54,8 +49,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                        f"(known: {', '.join(sorted(_KNOWN_TAGS))})")
 
         try:
-            with json_path.open(encoding="utf-8-sig") as f:
-                data = json.load(f)
+            data = project.load_json(json_path)
         except Exception as e:
             bad.append(f"{rel}: invalid JSON: {e}")
             continue
@@ -73,8 +67,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             namespace, _, path = (ref if ":" in ref else f"minecraft:{ref}").partition(":")
             if namespace != ctx.namespace or value_id.startswith("#"):
                 continue
-            structure_file = namespace_root / "worldgen" / "structure" / f"{path}.json"
-            if not structure_file.exists():
+            if not (project.worldgen_structure_dir / f"{path}.json").exists():
                 bad.append(f"{rel}: structure {ref!r} not found in this project")
 
     for msg in bad:

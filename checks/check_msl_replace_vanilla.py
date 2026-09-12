@@ -1,15 +1,16 @@
-"""Validate data/<ns>/moogs_structures/replace_vanilla.json.
+"""``data/<ns>/moogs_structures/replace_vanilla.json`` (MSL 3.1.0+).
 
 Covers the presets block, the structures block, and the vanilla tag hookups a
-replacement needs to actually be discoverable in-game (eyes of ender for
-strongholds, ocean explorer maps for monuments). See MSL:
-- config/ReplaceVanillaManager.java  (presets parser)
-- config/StructureListManager.java   (structures block)
+replacement needs to be discoverable in-game (eyes of ender for strongholds,
+ocean explorer maps for monuments). MSL's parser is lenient -- it warns and
+skips malformed data -- so a broken preset silently disables the feature at
+runtime. Missing or mistyped required fields are errors; likely mistakes that
+still load are warnings.
 
-The parser is lenient (warn-and-skip on malformed data), so a broken preset
-silently disables the feature at runtime. This check exists to close that gap:
-missing/typo'd required fields -> ERROR; likely mistakes that still load ->
-WARN (printed, doesn't fail the check).
+The set of vanilla structures a preset may replace comes from mcmeta's
+``worldgen/structure`` registry across the targeted versions, so a structure
+added in a later Minecraft release is recognised as soon as the project
+targets it. The bundled list is the fallback when the registry cannot be read.
 """
 from __future__ import annotations
 
@@ -18,16 +19,16 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from utils import replace_vanilla as rv
+from core import replace_vanilla as rv
+from core.context import Services, services
+from core.project import Project
 
 if TYPE_CHECKING:
-    from validator import ValidatorContext
+    from core.context import ValidatorContext
 
 
-# Small stable set. If MSL ever gains support for additional vanilla structures
-# (e.g. trial_chambers replacement) add them here — nothing else in the check
-# needs to change.
-_VANILLA_STRUCTURES: set[str] = {
+# Fallback when mcmeta is unreachable: the vanilla structures as of 26.2.
+_VANILLA_STRUCTURES_FALLBACK: set[str] = {
     "minecraft:ancient_city",
     "minecraft:bastion_remnant",
     "minecraft:buried_treasure",
@@ -63,12 +64,11 @@ _VANILLA_STRUCTURES: set[str] = {
     "minecraft:village_snowy",
     "minecraft:village_taiga",
 }
-
+_VANILLA_STRUCTURES = _VANILLA_STRUCTURES_FALLBACK
 
 # Vanilla structures whose discovery depends on a namespaced tag. If a preset
-# replaces one of these, the replacement must be added to the vanilla tag or the
-# gameplay hookup silently breaks (eyes of ender don't lead to the stronghold,
-# ocean explorer maps don't lead to the monument).
+# replaces one of these, the replacement must be added to the tag or the
+# gameplay hookup silently breaks.
 _TAG_HOOKUPS: dict[str, str] = {
     "minecraft:stronghold": "eye_of_ender_located",
     "minecraft:monument":   "on_ocean_explorer_maps",
@@ -78,40 +78,46 @@ _ID_RE = re.compile(r"^[a-z0-9_.-]+:[a-z0-9_./-]+$")
 _PLACEHOLDER_RE = re.compile(r"\{([^{}]+)\}")
 
 
+def _vanilla_structures(svc: Services) -> set[str]:
+    """Every vanilla ``worldgen/structure`` id on any targeted version.
+
+    mcmeta's summary omits the registry for a few versions (1.21 among them),
+    so the union is taken over the versions that do carry it; the bundled list
+    stands in when none do or the fetch fails.
+    """
+    found: set[str] = set()
+    for v in svc.mc_versions:
+        try:
+            found |= svc.mcmeta.registry(v, "worldgen/structure")
+        except Exception:
+            continue
+    return found | _VANILLA_STRUCTURES_FALLBACK if found else set(_VANILLA_STRUCTURES_FALLBACK)
+
+
 def _is_id(s: object) -> bool:
     return isinstance(s, str) and bool(_ID_RE.match(s))
 
 
-def _structure_exists(namespace_root: Path, id_: str) -> bool:
-    """True if data/<id_ns>/worldgen/structure/<id_path>.json exists (any pack root)."""
+def _structure_exists(project: Project, id_: str) -> bool:
     ns, _, path = id_.partition(":")
     if not ns or not path:
         return False
-    # The mod's own structures live under project_root/src/main/resources/data/<ns>/...
-    data_root = namespace_root.parent
-    return (data_root / ns / "worldgen" / "structure" / f"{path}.json").exists()
+    return (project.data_root / ns / "worldgen" / "structure" / f"{path}.json").exists()
 
 
-def _structure_set_exists(namespace_root: Path, id_: str) -> bool:
+def _structure_set_exists(project: Project, id_: str) -> bool:
     ns, _, path = id_.partition(":")
     if not ns or not path:
         return False
-    data_root = namespace_root.parent
-    return (data_root / ns / "worldgen" / "structure_set" / f"{path}.json").exists()
+    return (project.data_root / ns / "worldgen" / "structure_set" / f"{path}.json").exists()
 
 
-def _vanilla_tag_contains(project_root: Path, tag: str, entry_id: str) -> bool:
-    """True if data/minecraft/tags/worldgen/structure/<tag>.json lists entry_id."""
-    tag_path = (project_root / "src" / "main" / "resources"
-                / "data" / "minecraft" / "tags" / "worldgen" / "structure"
-                / f"{tag}.json")
+def _vanilla_tag_contains(project: Project, tag: str, entry_id: str) -> bool:
+    """True if ``data/minecraft/tags/worldgen/structure/<tag>.json`` lists ``entry_id``."""
+    tag_path = project.data_root / "minecraft" / "tags" / "worldgen" / "structure" / f"{tag}.json"
     if not tag_path.exists():
         return False
-    try:
-        with tag_path.open(encoding="utf-8-sig") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return False
+    data = project.try_json(tag_path)
     if not isinstance(data, dict):
         return False
     values = data.get("values")
@@ -125,12 +131,8 @@ def _vanilla_tag_contains(project_root: Path, tag: str, entry_id: str) -> bool:
     return False
 
 
-def _validate_presets(
-    manifest: rv.ReplaceVanillaFile,
-    namespace_root: Path,
-    errors: list[str],
-    warnings: list[str],
-) -> None:
+def _validate_presets(manifest: rv.ReplaceVanillaFile, project: Project, vanilla: set[str],
+                      errors: list[str]) -> None:
     seen_ids: dict[str, int] = {}
     for pi, preset in enumerate(manifest.presets):
         where = f"presets[{pi}]"
@@ -141,14 +143,13 @@ def _validate_presets(
         pid = preset.get("id")
         if not isinstance(pid, str) or not pid.strip():
             errors.append(f"  [ERROR] {where}.id: missing or empty")
+        elif pid in seen_ids:
+            errors.append(
+                f"  [ERROR] {where}.id = {pid!r}: duplicate of presets[{seen_ids[pid]}] "
+                f"(the second one silently overwrites the first)"
+            )
         else:
-            if pid in seen_ids:
-                errors.append(
-                    f"  [ERROR] {where}.id = {pid!r}: duplicate of presets[{seen_ids[pid]}] "
-                    f"(the second one silently overwrites the first)"
-                )
-            else:
-                seen_ids[pid] = pi
+            seen_ids[pid] = pi
 
         default_enabled = preset.get("default_enabled")
         if default_enabled is not None and not isinstance(default_enabled, bool):
@@ -176,10 +177,8 @@ def _validate_presets(
                 errors.append(f"  [ERROR] {rwhere}.vanilla_structure: missing (parser skips this replacement)")
             elif not _is_id(vs):
                 errors.append(f"  [ERROR] {rwhere}.vanilla_structure = {vs!r}: not a valid resource id")
-            elif vs not in _VANILLA_STRUCTURES:
-                errors.append(
-                    f"  [ERROR] {rwhere}.vanilla_structure = {vs!r}: not a known vanilla structure"
-                )
+            elif vs not in vanilla:
+                errors.append(f"  [ERROR] {rwhere}.vanilla_structure = {vs!r}: not a known vanilla structure")
 
             rs = rep.get("replacement_structure")
             if rs is None:
@@ -189,18 +188,14 @@ def _validate_presets(
                 )
             elif not isinstance(rs, str) or not _is_id(rs):
                 errors.append(f"  [ERROR] {rwhere}.replacement_structure = {rs!r}: not a valid resource id")
-            elif not _structure_exists(namespace_root, rs):
+            elif not _structure_exists(project, rs):
                 errors.append(
                     f"  [ERROR] {rwhere}.replacement_structure = {rs!r}: "
                     f"no worldgen/structure JSON found"
                 )
 
 
-def _validate_tag_hookups(
-    manifest: rv.ReplaceVanillaFile,
-    project_root: Path,
-    warnings: list[str],
-) -> None:
+def _validate_tag_hookups(manifest: rv.ReplaceVanillaFile, project: Project, warnings: list[str]) -> None:
     for pi, preset in enumerate(manifest.presets):
         if not isinstance(preset, dict):
             continue
@@ -214,7 +209,7 @@ def _validate_tag_hookups(
             tag = _TAG_HOOKUPS.get(vs)
             if tag is None:
                 continue
-            if not _vanilla_tag_contains(project_root, tag, rs):
+            if not _vanilla_tag_contains(project, tag, rs):
                 warnings.append(
                     f"  [WARN] presets[{pi}].replacements[{ri}]: replacing {vs} with {rs} but "
                     f"{rs} is not in data/minecraft/tags/worldgen/structure/{tag}.json "
@@ -222,20 +217,14 @@ def _validate_tag_hookups(
                 )
 
 
-def _validate_structures_block(
-    manifest: rv.ReplaceVanillaFile,
-    namespace_root: Path,
-    errors: list[str],
-    warnings: list[str],
-) -> None:
+def _validate_structures_block(manifest: rv.ReplaceVanillaFile, project: Project,
+                               errors: list[str], warnings: list[str]) -> None:
     block = manifest.structures
     if block is None:
-        # Not an error; the block is optional. Only note it if the raw file
-        # had a "structures" key with the wrong shape.
         if "structures" in manifest.raw and not isinstance(manifest.raw["structures"], dict):
-            errors.append(f"  [ERROR] structures: must be an object")
+            errors.append("  [ERROR] structures: must be an object")
         else:
-            warnings.append(f"  [WARN] no 'structures' block: no metadata for structure preview UI")
+            warnings.append("  [WARN] no 'structures' block: no metadata for structure preview UI")
         return
 
     mod_slug = block.get("mod_slug")
@@ -243,22 +232,21 @@ def _validate_structures_block(
 
     if mod_slug is None and template is None:
         warnings.append(
-            f"  [WARN] structures: neither 'mod_slug' nor 'preview_url_template' set "
-            f"(preview buttons will be disabled)"
+            "  [WARN] structures: neither 'mod_slug' nor 'preview_url_template' set "
+            "(preview buttons will be disabled)"
         )
 
     if template is not None:
         if not isinstance(template, str):
-            errors.append(f"  [ERROR] structures.preview_url_template: must be string")
+            errors.append("  [ERROR] structures.preview_url_template: must be string")
         else:
             placeholders = set(_PLACEHOLDER_RE.findall(template))
             if "{structure}" not in template:
                 warnings.append(
-                    f"  [WARN] structures.preview_url_template: no '{{structure}}' token; "
-                    f"every row will point at the same URL"
+                    "  [WARN] structures.preview_url_template: no '{structure}' token; "
+                    "every row will point at the same URL"
                 )
-            unsupported = placeholders - {"structure", "mc_version"}
-            for token in sorted(unsupported):
+            for token in sorted(placeholders - {"structure", "mc_version"}):
                 warnings.append(
                     f"  [WARN] structures.preview_url_template: unsupported token '{{{token}}}' "
                     f"(only {{structure}} and {{mc_version}} are substituted)"
@@ -268,7 +256,7 @@ def _validate_structures_block(
     if entries is None:
         return
     if not isinstance(entries, list):
-        errors.append(f"  [ERROR] structures.entries: must be an array")
+        errors.append("  [ERROR] structures.entries: must be an array")
         return
     for ei, entry in enumerate(entries):
         ewhere = f"structures.entries[{ei}]"
@@ -280,21 +268,19 @@ def _validate_structures_block(
             errors.append(f"  [ERROR] {ewhere}.structure: missing")
         elif not _is_id(sid):
             errors.append(f"  [ERROR] {ewhere}.structure = {sid!r}: not a valid resource id")
-        elif not _structure_set_exists(namespace_root, sid):
-            errors.append(
-                f"  [ERROR] {ewhere}.structure = {sid!r}: no worldgen/structure_set JSON found"
-            )
+        elif not _structure_set_exists(project, sid):
+            errors.append(f"  [ERROR] {ewhere}.structure = {sid!r}: no worldgen/structure_set JSON found")
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-    manifest = rv.load(namespace_root)
+    svc = services(ctx)
+    project = svc.project
+    manifest = rv.load(project)
 
     if manifest is None:
-        path = rv.manifest_path(namespace_root)
+        path = rv.manifest_path(project)
         if path.exists():
-            # Existed but couldn't parse.
-            print(f"  [ERROR] {path.relative_to(ctx.project_root)}: invalid JSON")
+            print(f"  [ERROR] {path.relative_to(project.root)}: invalid JSON")
             return False, "replace_vanilla.json is not valid JSON"
         print("  no replace_vanilla.json (skipping)")
         return True, "no replace_vanilla.json"
@@ -308,9 +294,9 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             "the file has no effect"
         )
 
-    _validate_presets(manifest, namespace_root, errors, warnings)
-    _validate_tag_hookups(manifest, ctx.project_root, warnings)
-    _validate_structures_block(manifest, namespace_root, errors, warnings)
+    _validate_presets(manifest, project, _vanilla_structures(svc), errors)
+    _validate_tag_hookups(manifest, project, warnings)
+    _validate_structures_block(manifest, project, errors, warnings)
 
     for msg in warnings:
         print(msg)

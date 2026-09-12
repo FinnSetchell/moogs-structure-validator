@@ -1,24 +1,24 @@
+"""Entities in structure files: known ids, item shape, mob-effect shape, and
+DataVersion drift.
+
+* every entity id exists in the entity registry at the file's minimum version;
+* hand/armor/body items use ``Count`` before 1.20.5 and ``count`` from it;
+* mob effects use ``ActiveEffects`` before 1.20.2 and ``active_effects`` from
+  it, with snake_case fields and known effect ids on the new side;
+* a file saved on a newer game than its wired target is reported (drift is
+  informational: the data fixer loads it, but content checks may still fire).
+"""
 from __future__ import annotations
 
 from collections import defaultdict
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-import nbtlib
-
-from registries.fetcher import _fetch_version, fetch_registry_set
-from utils.boundaries import DV_1_20_2, DV_1_20_5, BoundarySide, side_of
-from utils.entity_walk import iter_entities
-from utils.nbt_cache import load_nbt
-from utils.nbt_versions import _build_nbt_version_ranges, _parse_version
-from utils.paths import data_dir
-from utils.versions import load_version_map
+from core.context import services
+from core.ids import is_valid, non_minecraft
+from core.mcversions import DV_1_20_2, DV_1_20_5, BoundarySide, side_of
 
 if TYPE_CHECKING:
-    from validator import ValidatorContext
-
-
-_NEW_ITEM_FORMAT_DV = DV_1_20_5  # 1.20.5
+    from core.context import ValidatorContext
 
 # Fields on the old (pre-1.20.2) ActiveEffects entry.
 _LEGACY_EFFECT_FIELDS = frozenset({
@@ -26,21 +26,8 @@ _LEGACY_EFFECT_FIELDS = frozenset({
 })
 
 
-def _is_valid(id_: str, valid_set: set[str], extra_ids: set[str]) -> bool:
-    if id_ in valid_set:
-        return True
-    if id_ in extra_ids:
-        return True
-    ns = id_.split(":", 1)[0]
-    if f"{ns}:*" in extra_ids:
-        return True
-    return False
-
-
-def _check_item_format(
-    item: nbtlib.Compound, slot_desc: str, entity_id: str, rel: str,
-    expect_old: bool, min_version_name: str,
-) -> str | None:
+def _check_item_format(item: dict, slot_desc: str, entity_id: str, rel: str,
+                       expect_old: bool, min_version_name: str) -> str | None:
     if "id" not in item:
         return None
     has_old = "Count" in item
@@ -58,20 +45,13 @@ def _check_item_format(
     return None
 
 
-def _check_mob_effects(
-    entity_nbt: nbtlib.Compound, entity_path: str, entity_id: str, rel: str,
-    min_version: str, max_version: str, min_dv: int, max_dv: int,
-    valid_effect_ids: set[str] | None,
-    extra_ids: set[str],
-) -> list[str]:
-    """Check ActiveEffects vs active_effects at the 1.20.2 boundary.
-    Also checks per-effect id / field format.
-    """
+def _check_mob_effects(entity: dict, entity_path: str, entity_id: str, rel: str,
+                       min_version: str, max_version: str, min_dv: int, max_dv: int,
+                       valid_effect_ids: set[str] | None, extra_ids: set[str]) -> list[str]:
     errors: list[str] = []
     side = side_of(min_dv, max_dv, DV_1_20_2)
-
-    legacy = entity_nbt.get("ActiveEffects")
-    new = entity_nbt.get("active_effects")
+    legacy = entity.get("ActiveEffects")
+    new = entity.get("active_effects")
 
     if side == BoundarySide.NEW:
         if isinstance(legacy, list) and legacy:
@@ -81,7 +61,7 @@ def _check_mob_effects(
             )
         if isinstance(new, list):
             for i, eff in enumerate(new):
-                if not isinstance(eff, nbtlib.Compound):
+                if not isinstance(eff, dict):
                     continue
                 eff_path = f"{entity_path}.active_effects[{i}]"
                 id_tag = eff.get("id")
@@ -90,19 +70,18 @@ def _check_mob_effects(
                     continue
                 id_str = str(id_tag)
                 if not id_str.startswith("minecraft:") and ":" in id_str:
-                    # allow non-vanilla ids via extra_ids
-                    if not _is_valid(id_str, valid_effect_ids or set(), extra_ids):
+                    if not is_valid(id_str, valid_effect_ids or set(), extra_ids):
                         errors.append(
                             f"[ERROR] {rel}: {eff_path}: unknown mob_effect id '{id_str}'"
                             f" (min target {min_version})"
                         )
-                elif valid_effect_ids is not None and not _is_valid(id_str, valid_effect_ids, extra_ids):
+                elif valid_effect_ids is not None and not is_valid(id_str, valid_effect_ids, extra_ids):
                     errors.append(
                         f"[ERROR] {rel}: {eff_path}: unknown mob_effect id '{id_str}'"
                         f" (min target {min_version})"
                     )
-                # PascalCase fields on new-format effect = FAIL
-                bad = [f for f in _LEGACY_EFFECT_FIELDS if f in eff]
+                # Sorted: this list is printed, and set order varies per process.
+                bad = sorted(f for f in _LEGACY_EFFECT_FIELDS if f in eff)
                 if bad:
                     errors.append(
                         f"[ERROR] {rel}: {eff_path}: PascalCase field(s) {bad} on new-format"
@@ -114,33 +93,26 @@ def _check_mob_effects(
                 f"[ERROR] {rel}: {entity_path} ({entity_id}) uses new `active_effects` on a"
                 f" max<1.20.2 target ({max_version}); use `ActiveEffects`"
             )
-    else:  # SPANS
+    else:
         if isinstance(legacy, list) or isinstance(new, list):
             errors.append(
                 f"[ERROR] {rel}: {entity_path} ({entity_id}) has mob effects but its wired"
                 f" range {min_version}..{max_version} spans 1.20.2 (renamed here);"
                 f" no single file can be correct on both sides"
             )
-
     return errors
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-    structures_dir = data_dir(namespace_root, "structure")
-
-    if not structures_dir.exists():
+    svc = services(ctx)
+    store, reg = svc.structures, svc.mcmeta
+    if not store.dir.exists():
         return True, "no structures directory"
 
-    cache_dir = Path(__file__).parent.parent / "cache"
-
-    version_map = load_version_map(cache_dir, ctx.refresh)
-
+    version_map = svc.versions
     max_allowed_dv: int | None = None
     max_version_name: str | None = None
     min_allowed_dv: int | None = None
-    min_version_name: str | None = None
-
     if version_map:
         for v in ctx.mc_versions:
             dv = version_map.get(v)
@@ -148,47 +120,33 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                 print(f"  [WARN] version '{v}' not found in versions.json -- skipping DataVersion check for it")
                 continue
             if max_allowed_dv is None or dv > max_allowed_dv:
-                max_allowed_dv = dv
-                max_version_name = v
+                max_allowed_dv, max_version_name = dv, v
             if min_allowed_dv is None or dv < min_allowed_dv:
                 min_allowed_dv = dv
-                min_version_name = v
 
     if min_allowed_dv is None:
         item_check_mode: str | None = None
-    elif min_allowed_dv < _NEW_ITEM_FORMAT_DV:
-        item_check_mode = "old"
     else:
-        item_check_mode = "new"
+        item_check_mode = "old" if min_allowed_dv < DV_1_20_5 else "new"
 
-    template_pool_dir = namespace_root / "worldgen" / "template_pool"
-    global_min_version = min(ctx.mc_versions, key=_parse_version)
-    global_max_version = max(ctx.mc_versions, key=_parse_version)
-    nbt_ranges = {}
-    if template_pool_dir.exists():
-        nbt_ranges = _build_nbt_version_ranges(
-            template_pool_dir, structures_dir, ctx.namespace, global_min_version,
-            ctx.mc_versions, global_max_version,
-        )
-    non_minecraft_valid_entities = {e for e in ctx.valid_entities if not e.startswith("minecraft:")}
-    version_entity_cache: dict[str, set[str]] = {}
-    version_effect_cache: dict[str, set[str]] = {}
+    modded_entities = non_minecraft(ctx.valid_entities)
+    entity_sets: dict[str, set[str]] = {}
+    effect_sets: dict[str, set[str] | None] = {}
 
     def valid_entities_for(version: str) -> set[str]:
-        if version not in version_entity_cache:
-            vdata = _fetch_version(version, cache_dir, ctx.refresh)
-            version_entity_cache[version] = (
-                {"minecraft:" + n for n in vdata.get("entity_type", [])}
-                | non_minecraft_valid_entities
-            )
-        return version_entity_cache[version]
+        s = entity_sets.get(version)
+        if s is None:
+            s = reg.registry(version, "entity_type") | modded_entities
+            entity_sets[version] = s
+        return s
 
-    def valid_effects_for(version: str) -> set[str]:
-        if version not in version_effect_cache:
-            version_effect_cache[version] = fetch_registry_set(
-                version, cache_dir, ctx.refresh, "mob_effect"
-            )
-        return version_effect_cache[version]
+    def valid_effects_for(version: str) -> set[str] | None:
+        if version not in effect_sets:
+            try:
+                effect_sets[version] = reg.registry(version, "mob_effect")
+            except Exception:
+                effect_sets[version] = None
+        return effect_sets[version]
 
     dv_outdated: dict[tuple[int, str], list[str]] = defaultdict(list)
     dv_wired_info: list[str] = []
@@ -196,92 +154,70 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     files_checked = 0
     entities_checked = 0
 
-    for nbt_path in sorted(structures_dir.rglob("*.nbt")):
-        if nbt_path.resolve() in ctx.orphan_nbts:
-            continue
+    for nbt_path in store.checked_files():
         try:
-            nbt = load_nbt(ctx, nbt_path)
+            structure = store.load(nbt_path)
         except Exception as e:
             print(f"  [WARN] could not load {nbt_path.name}: {e}")
             continue
 
         files_checked += 1
-        rel = str(nbt_path.relative_to(structures_dir))
-
-        info = nbt_ranges.get(nbt_path)
-        file_min = info.min_version if info else global_min_version
-        file_max = info.max_version if info else global_max_version
-        is_wired = info is not None
-        file_min_dv = version_map.get(file_min)
-        file_max_dv = version_map.get(file_max)
+        rel = store.rel(nbt_path)
+        fr = svc.file_range(nbt_path)
+        file_min, file_max = fr.min_version, fr.max_version
+        file_min_dv, file_max_dv = fr.min_dv, fr.max_dv
 
         if file_min_dv is None:
             file_item_mode = item_check_mode
         else:
-            file_item_mode = "old" if file_min_dv < _NEW_ITEM_FORMAT_DV else "new"
+            file_item_mode = "old" if file_min_dv < DV_1_20_5 else "new"
 
-        dv_tag = nbt.get("DataVersion")
-        if dv_tag is not None:
-            file_dv = int(dv_tag)
-            if is_wired and file_min_dv is not None and file_dv > file_min_dv:
+        file_dv = structure.data_version
+        if file_dv is not None:
+            if fr.wired and file_min_dv is not None and file_dv > file_min_dv:
                 dv_wired_info.append(
                     f"[INFO] {rel}: DataVersion {file_dv} > wired min target"
                     f" {file_min} (DV {file_min_dv}); MC's data fixer handles the load,"
                     f" but content checks may still flag schema issues"
                 )
             elif max_allowed_dv is not None and file_dv > max_allowed_dv:
-                dv_version_name = next(
-                    (k for k, v in version_map.items() if v == file_dv), str(file_dv)
-                )
-                dv_outdated[(file_dv, dv_version_name)].append(rel)
+                dv_outdated[(file_dv, version_map.name_of(file_dv))].append(rel)
 
-        for entity_nbt, entity_path in iter_entities(nbt):
-            id_tag = entity_nbt.get("id")
+        for entity, entity_path in structure.walk_entities():
+            id_tag = entity.get("id")
             if id_tag is None:
                 continue
             entity_id = str(id_tag)
             entities_checked += 1
 
-            if not _is_valid(entity_id, valid_entities_for(file_min), ctx.extra_ids):
+            if not is_valid(entity_id, valid_entities_for(file_min), ctx.extra_ids):
                 errors.append(f"[ERROR] {rel}: {entity_path}: unknown entity ID '{entity_id}'")
 
             if file_item_mode is not None:
                 expect_old = file_item_mode == "old"
                 for list_field in ("HandItems", "ArmorItems"):
-                    items_tag = entity_nbt.get(list_field)
-                    if items_tag is None:
+                    items_tag = entity.get(list_field)
+                    if not isinstance(items_tag, list):
                         continue
                     for slot, item in enumerate(items_tag):
-                        if not isinstance(item, nbtlib.Compound):
+                        if not isinstance(item, dict):
                             continue
-                        msg = _check_item_format(
-                            item, f"{entity_path}.{list_field}[{slot}]", entity_id, rel,
-                            expect_old, file_min,
-                        )
+                        msg = _check_item_format(item, f"{entity_path}.{list_field}[{slot}]",
+                                                 entity_id, rel, expect_old, file_min)
                         if msg:
                             errors.append(msg)
-                body_item = entity_nbt.get("body_armor_item")
-                if isinstance(body_item, nbtlib.Compound):
-                    msg = _check_item_format(
-                        body_item, f"{entity_path}.body_armor_item", entity_id, rel,
-                        expect_old, file_min,
-                    )
+                body_item = entity.get("body_armor_item")
+                if isinstance(body_item, dict):
+                    msg = _check_item_format(body_item, f"{entity_path}.body_armor_item",
+                                             entity_id, rel, expect_old, file_min)
                     if msg:
                         errors.append(msg)
 
             if file_min_dv is not None and file_max_dv is not None:
-                valid_effects: set[str] | None
-                if version_map.get(file_min) is not None:
-                    try:
-                        valid_effects = valid_effects_for(file_min)
-                    except Exception:
-                        valid_effects = None
-                else:
-                    valid_effects = None
                 errors.extend(_check_mob_effects(
-                    entity_nbt, entity_path, entity_id, rel,
+                    entity, entity_path, entity_id, rel,
                     file_min, file_max, file_min_dv, file_max_dv,
-                    valid_effects, ctx.extra_ids,
+                    valid_effects_for(file_min), ctx.extra_ids,
                 ))
 
     if dv_wired_info:

@@ -1,4 +1,4 @@
-from utils.nbt_versions import _parse_range, _parse_version, _version_in_range
+from core.mcversions import parse_range as _parse_range, parse_version as _parse_version, version_in_range as _version_in_range
 
 
 def test_parse_version():

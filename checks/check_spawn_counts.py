@@ -1,7 +1,8 @@
-"""Validates MSL's msl_pieces_spawn_counts and msl_pieces_spawn_counts_additions
-datapack files: per-piece spawn count caps keyed by structure id.
+"""MSL's ``msl_pieces_spawn_counts`` and ``msl_pieces_spawn_counts_additions``
+files: per-piece spawn caps keyed by structure id.
 
-Format (from MSL's StructurePieceCountsManager):
+Format (from MSL's ``StructurePieceCountsManager``)::
+
   data/<ns>/msl_pieces_spawn_counts/<structure_path>.json
   {
     "pieces_spawn_counts": [
@@ -14,20 +15,20 @@ Format (from MSL's StructurePieceCountsManager):
       }
     ]
   }
+
 The file id is the structure the counts apply to. Additions files merge in
 extra entries and use the same shape. MSL errors at load when
-always_spawn_this_many exceeds never_spawn_more_than_this_many.
+``always_spawn_this_many`` exceeds ``never_spawn_more_than_this_many``.
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from utils.paths import all_data_dirs
+from core.context import services
+from core.project import Project
 
 if TYPE_CHECKING:
-    from validator import ValidatorContext
+    from core.context import ValidatorContext
 
 _DIRS = ("msl_pieces_spawn_counts", "msl_pieces_spawn_counts_additions")
 
@@ -40,8 +41,7 @@ _INT_FIELDS = (
 _KNOWN_FIELDS = set(_INT_FIELDS) | {"nbt_piece_name", "condition"}
 
 
-def _check_entry(ctx: ValidatorContext, where: str, entry: object,
-                 namespace_root: Path, bad: list[str]) -> None:
+def _check_entry(project: Project, where: str, entry: object, bad: list[str]) -> None:
     if not isinstance(entry, dict):
         bad.append(f"{where}: entry is not an object")
         return
@@ -51,9 +51,8 @@ def _check_entry(ctx: ValidatorContext, where: str, entry: object,
         bad.append(f"{where}: missing nbt_piece_name")
     else:
         namespace, _, path = (piece if ":" in piece else f"minecraft:{piece}").partition(":")
-        if namespace == ctx.namespace:
-            structure_dirs = all_data_dirs(namespace_root, "structure")
-            if not any((d / f"{path}.nbt").exists() for d in structure_dirs):
+        if namespace == project.namespace:
+            if not any((d / f"{path}.nbt").exists() for d in project.all_data_dirs("structure")):
                 bad.append(f"{where}: nbt_piece_name {piece!r} has no template NBT in this project")
 
     for key in _INT_FIELDS:
@@ -79,23 +78,18 @@ def _check_entry(ctx: ValidatorContext, where: str, entry: object,
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    namespace_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-
+    project = services(ctx).project
     bad: list[str] = []
     file_count = 0
 
     for dir_name in _DIRS:
-        counts_dir = namespace_root / dir_name
-        if not counts_dir.exists():
-            continue
-
-        for json_path in sorted(counts_dir.rglob("*.json")):
+        counts_dir = project.namespace_root / dir_name
+        for json_path in project.json_files(counts_dir):
             rel = json_path.relative_to(counts_dir)
             file_count += 1
 
             try:
-                with json_path.open(encoding="utf-8-sig") as f:
-                    data = json.load(f)
+                data = project.load_json(json_path)
             except Exception as e:
                 bad.append(f"{dir_name}/{rel}: invalid JSON: {e}")
                 continue
@@ -105,17 +99,15 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                 bad.append(f"{dir_name}/{rel}: missing pieces_spawn_counts list")
                 continue
 
-            # the file id names the structure these counts apply to
             structure_path = rel.with_suffix("").as_posix()
-            structure_file = namespace_root / "worldgen" / "structure" / f"{structure_path}.json"
-            if not structure_file.exists():
+            if not (project.worldgen_structure_dir / f"{structure_path}.json").exists():
                 bad.append(
                     f"{dir_name}/{rel}: no structure "
                     f"{ctx.namespace}:{structure_path} in this project"
                 )
 
             for i, entry in enumerate(entries):
-                _check_entry(ctx, f"{dir_name}/{rel} [{i}]", entry, namespace_root, bad)
+                _check_entry(project, f"{dir_name}/{rel} [{i}]", entry, bad)
 
     if file_count == 0:
         return True, "no spawn count files"

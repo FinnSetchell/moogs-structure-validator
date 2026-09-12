@@ -1,192 +1,117 @@
-"""Cross-reference checks for MSL 3.1.0+ placements and processors.
+"""Cross-references for MSL 3.1.0+ placements and processors.
 
-The schema pass in check_worldgen_schemas covers shape. This check covers
-relationships that JSON schemas can't express:
+The schema pass in ``check_worldgen_schemas`` covers shape. This covers the
+relationships a JSON schema cannot express:
 
-- conditional_concentric_rings placements must reference a preset that exists
-  in this pack's replace_vanilla.json (otherwise ReplaceVanillaManager.isEnabled
-  always returns false and the ring count is stuck on disabled_count forever).
-
-- vanilla_loot_swap_processor entries must (a) reference a preset that exists,
-  (b) map from loot tables that are actually used by some container in the
-  pack's NBTs (dead FROM keys silently do nothing), (c) map to loot tables
-  that exist in vanilla, and (d) live inside a processor_list that is
-  referenced by at least one template_pool element -- an unwired swap list
-  never fires.
-
-- advanced_random_spread with an explicit structure_id must point at a
-  structure that appears in the owning set's `structures` list.
+* ``conditional_concentric_rings`` must name a preset that exists in this
+  pack's ``replace_vanilla.json`` (otherwise ``ReplaceVanillaManager.isEnabled``
+  is always false and the ring count is stuck on ``disabled_count``);
+* ``vanilla_loot_swap_processor`` must (a) name a preset that exists, (b) map
+  from loot tables some container in the pack actually uses (a dead FROM key
+  does nothing), (c) map to loot tables that exist in vanilla, and (d) live in
+  a processor list some template pool element references -- an unwired swap
+  list never fires;
+* ``advanced_random_spread`` with an explicit ``structure_id`` must point at a
+  structure in the owning set's ``structures`` list.
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-import nbtlib
-
-from checks.check_containers import _CONTAINER_BLOCKS
-from registries.fetcher import fetch_registry_set
-from utils.nbt_cache import load_nbt
-from utils.paths import data_dir
-from utils import replace_vanilla as rv
+from checks.check_containers import CONTAINER_BLOCKS
+from core import replace_vanilla as rv
+from core.context import Services, services
+from core.project import Project
 
 if TYPE_CHECKING:
-    from validator import ValidatorContext
+    from core.context import ValidatorContext
 
 
-_CACHE_DIR = Path(__file__).parent.parent / "cache"
+def _walk(project: Project, directory):
+    for path in project.json_files(directory):
+        data = project.try_json(path)
+        if isinstance(data, dict):
+            yield path.relative_to(directory), data
 
 
-def _walk_structure_sets(ns_root: Path):
-    d = ns_root / "worldgen" / "structure_set"
-    if not d.exists():
-        return
-    for path in sorted(d.rglob("*.json")):
-        try:
-            with path.open(encoding="utf-8-sig") as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            continue
-        yield path.relative_to(d), data
-
-
-def _walk_processor_lists(ns_root: Path):
-    d = ns_root / "worldgen" / "processor_list"
-    if not d.exists():
-        return
-    for path in sorted(d.rglob("*.json")):
-        try:
-            with path.open(encoding="utf-8-sig") as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            continue
-        yield path.relative_to(d), data
-
-
-def _collect_pool_processor_refs(ns_root: Path) -> set[str]:
-    """Every string referenced under a template_pool element's `processors` field."""
+def _collect_pool_processor_refs(project: Project) -> set[str]:
+    """Every string a template pool element names under ``processors``."""
     refs: set[str] = set()
-    d = ns_root / "worldgen" / "template_pool"
-    if not d.exists():
-        return refs
-    for path in sorted(d.rglob("*.json")):
-        try:
-            with path.open(encoding="utf-8-sig") as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            continue
-        def visit(node):
-            if isinstance(node, dict):
-                # Element wrapper can nest via list_pool_element.
-                element = node.get("element", node)
-                if isinstance(element, dict):
-                    procs = element.get("processors")
-                    if isinstance(procs, str):
-                        refs.add(procs)
-                    nested = element.get("elements")
-                    if isinstance(nested, list):
-                        for n in nested:
-                            visit(n)
-                for v in node.values():
-                    if isinstance(v, (dict, list)):
-                        visit(v)
-            elif isinstance(node, list):
-                for v in node:
+
+    def visit(node):
+        if isinstance(node, dict):
+            element = node.get("element", node)
+            if isinstance(element, dict):
+                procs = element.get("processors")
+                if isinstance(procs, str):
+                    refs.add(procs)
+                nested = element.get("elements")
+                if isinstance(nested, list):
+                    for n in nested:
+                        visit(n)
+            for v in node.values():
+                if isinstance(v, (dict, list)):
                     visit(v)
+        elif isinstance(node, list):
+            for v in node:
+                visit(v)
+
+    for _, data in project.pools():
         visit(data)
     return refs
 
 
-def _collect_container_loot_refs(ctx) -> set[str]:
-    """LootTable ids referenced by any container block in any structure NBT."""
+def _collect_container_loot_refs(svc: Services) -> set[str]:
+    """``LootTable`` ids on any container block in any checked structure."""
     refs: set[str] = set()
-    ns_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-    structure_dir = data_dir(ns_root, "structure")
-    if not structure_dir.exists():
+    store = svc.structures
+    if not store.dir.exists():
         return refs
-    for nbt_path in sorted(structure_dir.rglob("*.nbt")):
-        if nbt_path.resolve() in ctx.orphan_nbts:
-            continue
-        try:
-            nbt = load_nbt(ctx, nbt_path)
-        except Exception:
-            continue
-        palette = nbt.get("palette")
-        blocks = nbt.get("blocks")
-        if palette is None or blocks is None:
+    for nbt_path in store.checked_files():
+        structure = store.try_load(nbt_path)
+        if structure is None or structure.palette is None:
             continue
         container_indices = {
-            i for i, state in enumerate(palette)
-            if str(state.get("Name", "")) in _CONTAINER_BLOCKS
+            i for i, name in enumerate(structure.palette_names()) if name in CONTAINER_BLOCKS
         }
-        for block in blocks:
-            if int(block.get("state", -1)) not in container_indices:
-                continue
-            block_nbt = block.get("nbt")
+        for _, _, _, block_nbt in structure.blocks_in_states(container_indices):
             if block_nbt is None:
                 continue
             loot = block_nbt.get("LootTable")
-            if isinstance(loot, nbtlib.String) or isinstance(loot, str):
-                refs.add(str(loot))
+            if isinstance(loot, str):
+                refs.add(loot)
     return refs
 
 
-def _resource_id_to_relpath(id_: str) -> tuple[str, str] | None:
+def _structure_exists(project: Project, id_: str) -> bool:
     ns, _, path = id_.partition(":")
     if not ns or not path:
-        return None
-    return ns, path
-
-
-def _structure_exists(project_root: Path, id_: str) -> bool:
-    parts = _resource_id_to_relpath(id_)
-    if parts is None:
         return False
-    ns, path = parts
-    return (project_root / "src" / "main" / "resources" / "data" / ns
-            / "worldgen" / "structure" / f"{path}.json").exists()
+    return (project.data_root / ns / "worldgen" / "structure" / f"{path}.json").exists()
 
 
 def _load_vanilla_loot_tables(ctx) -> set[str] | None:
-    """Union of vanilla loot table ids across every targeted MC version.
-
-    Returns None if the registry can't be fetched, so callers can skip the
-    check rather than raise false positives.
-    """
-    versions = getattr(ctx, "mc_versions", [])
-    if not versions:
+    """Union of vanilla loot table ids across every targeted MC version, or
+    None if the registry cannot be fetched (callers then skip that rule)."""
+    svc = services(ctx)
+    if not svc.mc_versions:
         return None
-    tables: set[str] = set()
-    for v in versions:
-        try:
-            tables |= fetch_registry_set(v, _CACHE_DIR, getattr(ctx, "refresh", False), "loot_table")
-        except Exception:
-            return None
-    return tables
+    try:
+        return set(svc.mcmeta.union("loot_table"))
+    except Exception:
+        return None
 
 
-def _preset_lookup(manifest: rv.ReplaceVanillaFile | None) -> set[str]:
-    """Set of vanilla_key values with at least one replacement in our own manifest."""
-    if manifest is None:
-        return set()
-    return {r.vanilla_key for r in manifest.replacements}
+def _preset_keys(manifest: rv.ReplaceVanillaFile | None) -> set[str]:
+    return manifest.vanilla_keys() if manifest is not None else set()
 
 
-def _check_conditional_rings(
-    ns_root: Path,
-    project_root: Path,
-    manifest: rv.ReplaceVanillaFile | None,
-    ns: str,
-    errors: list[str],
-    warnings: list[str],
-) -> None:
-    preset_keys = _preset_lookup(manifest)
-    for rel, data in _walk_structure_sets(ns_root):
+def _check_conditional_rings(project: Project, manifest, errors: list[str], warnings: list[str]) -> None:
+    preset_keys = _preset_keys(manifest)
+    ns = project.namespace
+    for rel, data in _walk(project, project.structure_set_dir):
         placement = data.get("placement")
-        if not isinstance(placement, dict):
-            continue
-        if placement.get("type") != "moogs_structures:conditional_concentric_rings":
+        if not isinstance(placement, dict) or placement.get("type") != "moogs_structures:conditional_concentric_rings":
             continue
         modid = placement.get("modid")
         vk = placement.get("vanilla_key")
@@ -215,34 +140,23 @@ def _check_conditional_rings(
             )
 
         sid = placement.get("structure_id")
-        if isinstance(sid, str) and not _structure_exists(project_root, sid):
-            errors.append(
-                f"  [ERROR] {where}: structure_id = {sid!r} does not resolve to a real structure"
-            )
+        if isinstance(sid, str) and not _structure_exists(project, sid):
+            errors.append(f"  [ERROR] {where}: structure_id = {sid!r} does not resolve to a real structure")
 
 
-def _check_advanced_random_spread(
-    ns_root: Path,
-    project_root: Path,
-    errors: list[str],
-) -> None:
-    for rel, data in _walk_structure_sets(ns_root):
+def _check_advanced_random_spread(project: Project, errors: list[str]) -> None:
+    for rel, data in _walk(project, project.structure_set_dir):
         placement = data.get("placement")
-        if not isinstance(placement, dict):
-            continue
-        if placement.get("type") != "moogs_structures:advanced_random_spread":
+        if not isinstance(placement, dict) or placement.get("type") != "moogs_structures:advanced_random_spread":
             continue
         where = f"structure_set/{rel}"
         sid = placement.get("structure_id")
         if not isinstance(sid, str):
             continue
 
-        if not _structure_exists(project_root, sid):
-            errors.append(
-                f"  [ERROR] {where}: structure_id = {sid!r} does not resolve to a real structure"
-            )
+        if not _structure_exists(project, sid):
+            errors.append(f"  [ERROR] {where}: structure_id = {sid!r} does not resolve to a real structure")
 
-        # Consistency with owning set: structure_id should be one of the set's structures.
         own_structures = {
             s.get("structure") for s in (data.get("structures") or [])
             if isinstance(s, dict) and isinstance(s.get("structure"), str)
@@ -254,29 +168,25 @@ def _check_advanced_random_spread(
             )
 
 
-def _check_vanilla_loot_swap(
-    ns_root: Path,
-    manifest: rv.ReplaceVanillaFile | None,
-    ns: str,
-    ctx,
-    errors: list[str],
-    warnings: list[str],
-) -> None:
-    preset_keys = _preset_lookup(manifest)
-    pool_processor_refs = _collect_pool_processor_refs(ns_root)
+def _check_vanilla_loot_swap(ctx, svc: Services, manifest, errors: list[str], warnings: list[str]) -> None:
+    project = svc.project
+    ns = project.namespace
+    preset_keys = _preset_keys(manifest)
+    pool_processor_refs = _collect_pool_processor_refs(project)
 
-    lazy: dict[str, set[str] | None] = {}
+    lazy: dict[str, object] = {}
+
     def container_refs() -> set[str]:
         if "containers" not in lazy:
-            lazy["containers"] = _collect_container_loot_refs(ctx)
+            lazy["containers"] = _collect_container_loot_refs(svc)
         return lazy["containers"]  # type: ignore[return-value]
 
     def vanilla_tables() -> set[str] | None:
         if "vanilla" not in lazy:
             lazy["vanilla"] = _load_vanilla_loot_tables(ctx)
-        return lazy["vanilla"]
+        return lazy["vanilla"]  # type: ignore[return-value]
 
-    for rel, data in _walk_processor_lists(ns_root):
+    for rel, data in _walk(project, project.processor_list_dir):
         processors = data.get("processors")
         if not isinstance(processors, list):
             continue
@@ -292,9 +202,7 @@ def _check_vanilla_loot_swap(
             )
 
         for i, p in enumerate(processors):
-            if not isinstance(p, dict):
-                continue
-            if p.get("processor_type") != "moogs_structures:vanilla_loot_swap_processor":
+            if not isinstance(p, dict) or p.get("processor_type") != "moogs_structures:vanilla_loot_swap_processor":
                 continue
             where = f"processor_list/{rel} @ processors[{i}]"
 
@@ -319,7 +227,6 @@ def _check_vanilla_loot_swap(
 
             crefs = container_refs()
             vtabs = vanilla_tables()
-
             for from_id, to_id in mapping.items():
                 if from_id not in crefs:
                     warnings.append(
@@ -334,15 +241,16 @@ def _check_vanilla_loot_swap(
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    ns_root = ctx.project_root / "src" / "main" / "resources" / "data" / ctx.namespace
-    manifest = rv.load(ns_root)
+    svc = services(ctx)
+    project = svc.project
+    manifest = rv.load(project)
 
     errors: list[str] = []
     warnings: list[str] = []
 
-    _check_conditional_rings(ns_root, ctx.project_root, manifest, ctx.namespace, errors, warnings)
-    _check_advanced_random_spread(ns_root, ctx.project_root, errors)
-    _check_vanilla_loot_swap(ns_root, manifest, ctx.namespace, ctx, errors, warnings)
+    _check_conditional_rings(project, manifest, errors, warnings)
+    _check_advanced_random_spread(project, errors)
+    _check_vanilla_loot_swap(ctx, svc, manifest, errors, warnings)
 
     for msg in warnings:
         print(msg)

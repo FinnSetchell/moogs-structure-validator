@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from checks import check_no_enchanted_books
-from utils.loot_tables import iter_enchanted_book_loot_entries
+from core.loot import iter_enchanted_book_loot_entries
 
 
 class _Ctx:
