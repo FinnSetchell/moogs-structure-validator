@@ -606,13 +606,35 @@ def test_painting_motive_on_1_21_target_fails(tmp_path, monkeypatch):
     assert not passed
 
 
-def test_painting_variant_on_pre_1_21_target_fails(tmp_path, monkeypatch):
+def test_painting_variant_on_1_20_target_passes(tmp_path, monkeypatch):
+    """`Motive` became `variant` in 1.19 (22w16a, DV 3091), three releases before the
+    oldest supported version, so `variant` is the right key on 1.20 too. The rule
+    used to put that rename at 1.21 and failed every 1.20 painting."""
     root, structures, pools = build_datapack(tmp_path)
     stub_registries(monkeypatch, entities={"minecraft:painting"})
 
     painting = Compound({
         "id": String("minecraft:painting"),
         "variant": String("minecraft:kebab"),
+    })
+    nbt = structure_nbt(3700, entities=[entity_entry(painting)])
+    save(nbt, structures / "p.nbt")
+    _wire(pools / "p.json", "test:p", {"1.20-1.20.4": "test:p"})
+
+    from checks import check_entity_nbt_keys as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, summary = mod.run(ctx)
+    assert passed, summary
+
+
+def test_painting_motive_on_1_20_target_fails(tmp_path, monkeypatch):
+    """No supported version reads `Motive`; the painting would show the default variant."""
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, entities={"minecraft:painting"})
+
+    painting = Compound({
+        "id": String("minecraft:painting"),
+        "Motive": String("minecraft:kebab"),
     })
     nbt = structure_nbt(3700, entities=[entity_entry(painting)])
     save(nbt, structures / "p.nbt")

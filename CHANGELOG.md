@@ -1,5 +1,12 @@
 # changelog
 
+## v1.11.1 -- 2026-09-13
+
+### Fixed
+- **`check_entity_nbt_keys` failed every painting in a file wired below 1.21.** Its table put the painting `Motive` -> `variant` rename at 1.21 (DataVersion 3953) and told 1.20 files to use `Motive`. The rename happened in 1.19 (22w16a, DataVersion 3091: "Renamed fields `Motive` -> `variant` and `Facing` -> `facing`"), three releases before the oldest version the validator supports, so `variant` is the right key everywhere. The 1.21 painting change (24w18a) made the *variants* data-driven and left the key alone.
+
+  The `variant` rule is gone. `Motive` stays listed as dead on every supported version, since the game ignores it and the painting silently shows the default variant. It fires on Moog's Nether Structures 2's 1.20 datapack: three copies of one mega-fortress piece carry `Motive` on files saved at DataVersion 3463 and later, past the rename, so the game never renames it and that painting shows the default variant instead of `alban`. The old rule called those files correct.
+
 ## v1.11.0 -- 2026-09-12
 
 ### Changed

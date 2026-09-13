@@ -1,3 +1,6 @@
+## v1.11.1 (2026-09-13)
+- [x] `data/entity_nbt_keys.json` -- painting `variant` rule removed (the `Motive` -> `variant` rename is 1.19/22w16a, DV 3091, before every supported version); `Motive` kept as dead everywhere (`max_dv` 3090). Checked against misode/technical-changes and the mcmeta version index; vanilla's own structure files carry no paintings to check against; the corrected rule surfaces 3 `Motive` paintings in MNS2 1.20-datapack that the old one passed
+
 ## v1.11.0 (2026-09-12)
 - [x] `core/` -- new runtime shared by every check: `project.py` (layout, listings and JSON read once), `nbt.py` (structure parser + per-file index), `structures.py` (files parsed once), `mcmeta.py` (registries, version index, biome tags; one fetch seam), `mcversions.py` (versions, boundaries, `VersionIndex`), `ranges.py` (pool-derived target ranges), `items.py`, `loot.py`, `ids.py`, `replace_vanilla.py`, `context.py` (`ValidatorContext` + `services(ctx)`)
 - [x] every check rewritten on `core`; `utils/` and `registries/` removed; `registries/entity_nbt_keys.json` -> `data/entity_nbt_keys.json`
