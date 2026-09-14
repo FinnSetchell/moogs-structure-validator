@@ -439,6 +439,58 @@ def test_advanced_spread_bad_structure_id_pattern_fails(tmp_path):
     assert not passed
 
 
+# ---------- advanced_random_spread when_replacing ----------
+
+def _when_replacing(**overrides) -> dict:
+    block = {"modid": "test", "vanilla_key": "fortress", "spacing": 40, "separation": 8}
+    block.update(overrides)
+    return block
+
+
+def test_advanced_spread_when_replacing_valid_passes(tmp_path):
+    _write(tmp_path, "test", "structure_set", "s.json",
+           _spread(when_replacing=_when_replacing()))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
+def test_advanced_spread_when_replacing_missing_field_fails(tmp_path):
+    block = _when_replacing()
+    del block["vanilla_key"]
+    _write(tmp_path, "test", "structure_set", "s.json", _spread(when_replacing=block))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_advanced_spread_when_replacing_unknown_key_fails(tmp_path, capsys):
+    _write(tmp_path, "test", "structure_set", "s.json",
+           _spread(when_replacing=_when_replacing(density=3)))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed
+    assert "density" in out
+
+
+def test_advanced_spread_when_replacing_negative_spacing_fails(tmp_path):
+    _write(tmp_path, "test", "structure_set", "s.json",
+           _spread(when_replacing=_when_replacing(spacing=-1)))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_advanced_spread_when_replacing_non_object_fails(tmp_path):
+    _write(tmp_path, "test", "structure_set", "s.json", _spread(when_replacing="yes"))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+def test_advanced_spread_when_replacing_modid_not_string_fails(tmp_path):
+    _write(tmp_path, "test", "structure_set", "s.json",
+           _spread(when_replacing=_when_replacing(modid=7)))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
 def test_flood_processor_valid_passes(tmp_path):
     procs = [
         {"processor_type": "moogs_structures:flood_with_water_processor", "flood_level": 62},

@@ -171,6 +171,64 @@ def test_default_enabled_non_bool_fails(tmp_path):
     assert not passed
 
 
+# ---------- per-replacement options ----------
+
+def _preset_with_options(options) -> dict:
+    preset = _preset("replace_pyramid", "minecraft:desert_pyramid", "test:my_pyramid")
+    preset["replacements"][0]["options"] = options
+    return preset
+
+
+def _run_with_options(tmp_path, options):
+    _write_structure(tmp_path, "test:my_pyramid")
+    _write_manifest(tmp_path, {"presets": [_preset_with_options(options)]})
+    return mod.run(_ctx(tmp_path))
+
+
+def test_all_options_true_passes(tmp_path):
+    passed, _ = _run_with_options(tmp_path, {
+        "alias_lookups": True,
+        "inherit_spawn_overrides": True,
+        "redirect_locate": True,
+        "mirror_tags": True,
+    })
+    assert passed
+
+
+def test_partial_options_pass(tmp_path):
+    passed, _ = _run_with_options(tmp_path, {"redirect_locate": False})
+    assert passed
+
+
+def test_empty_options_passes(tmp_path):
+    passed, _ = _run_with_options(tmp_path, {})
+    assert passed
+
+
+def test_unknown_option_key_fails_and_names_it(tmp_path, capsys):
+    passed, _ = _run_with_options(tmp_path, {"alias_lookup": True})
+    out = capsys.readouterr().out
+    assert not passed
+    assert "alias_lookup" in out
+
+
+def test_non_boolean_option_fails(tmp_path, capsys):
+    passed, _ = _run_with_options(tmp_path, {"mirror_tags": "true"})
+    out = capsys.readouterr().out
+    assert not passed
+    assert "mirror_tags" in out and "boolean" in out
+
+
+def test_options_not_an_object_fails(tmp_path):
+    passed, _ = _run_with_options(tmp_path, ["alias_lookups"])
+    assert not passed
+
+
+def test_options_null_fails(tmp_path):
+    passed, _ = _run_with_options(tmp_path, None)
+    assert not passed
+
+
 # ---------- tag hookups (warnings only) ----------
 
 def test_stronghold_missing_tag_warns_but_passes(tmp_path, capsys):

@@ -1,8 +1,9 @@
 """``data/<ns>/moogs_structures/replace_vanilla.json`` (MSL 3.1.0+).
 
-Covers the presets block, the structures block, and the vanilla tag hookups a
-replacement needs to be discoverable in-game (eyes of ender for strongholds,
-ocean explorer maps for monuments). MSL's parser is lenient -- it warns and
+Covers the presets block, the per-replacement ``options`` block, the structures
+block, and the vanilla tag hookups a replacement needs to be discoverable
+in-game (eyes of ender for strongholds, ocean explorer maps for monuments).
+MSL's parser is lenient -- it warns and
 skips malformed data -- so a broken preset silently disables the feature at
 runtime. Missing or mistyped required fields are errors; likely mistakes that
 still load are warnings.
@@ -77,6 +78,17 @@ _TAG_HOOKUPS: dict[str, str] = {
 _ID_RE = re.compile(r"^[a-z0-9_.-]+:[a-z0-9_./-]+$")
 _PLACEHOLDER_RE = re.compile(r"\{([^{}]+)\}")
 
+# Per-replacement fidelity switches (MSL 3.1.3+). Each defaults to true when
+# absent and the whole block is optional, so a misspelled key is invisible at
+# runtime: MSL logs one warning and keeps the default, meaning the behaviour the
+# author meant to switch OFF stays on.
+_REPLACEMENT_OPTIONS: tuple[str, ...] = (
+    "alias_lookups",
+    "inherit_spawn_overrides",
+    "redirect_locate",
+    "mirror_tags",
+)
+
 
 def _vanilla_structures(svc: Services) -> set[str]:
     """Every vanilla ``worldgen/structure`` id on any targeted version.
@@ -129,6 +141,28 @@ def _vanilla_tag_contains(project: Project, tag: str, entry_id: str) -> bool:
         if isinstance(v, dict) and v.get("id") == entry_id:
             return True
     return False
+
+
+def _validate_options(rep: dict, rwhere: str, errors: list[str]) -> None:
+    """The optional ``options`` block on one replacement."""
+    if "options" not in rep:
+        return
+    options = rep["options"]
+    if not isinstance(options, dict):
+        errors.append(
+            f"  [ERROR] {rwhere}.options: must be an object, got {type(options).__name__}"
+        )
+        return
+    for key, value in options.items():
+        if key not in _REPLACEMENT_OPTIONS:
+            errors.append(
+                f"  [ERROR] {rwhere}.options.{key}: unknown option (ignored at runtime; "
+                f"valid options are {', '.join(_REPLACEMENT_OPTIONS)})"
+            )
+        elif not isinstance(value, bool):
+            errors.append(
+                f"  [ERROR] {rwhere}.options.{key}: must be boolean, got {type(value).__name__}"
+            )
 
 
 def _validate_presets(manifest: rv.ReplaceVanillaFile, project: Project, vanilla: set[str],
@@ -193,6 +227,8 @@ def _validate_presets(manifest: rv.ReplaceVanillaFile, project: Project, vanilla
                     f"  [ERROR] {rwhere}.replacement_structure = {rs!r}: "
                     f"no worldgen/structure JSON found"
                 )
+
+            _validate_options(rep, rwhere, errors)
 
 
 def _validate_tag_hookups(manifest: rv.ReplaceVanillaFile, project: Project, warnings: list[str]) -> None:

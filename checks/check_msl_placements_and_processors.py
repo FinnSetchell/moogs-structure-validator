@@ -12,7 +12,11 @@ relationships a JSON schema cannot express:
   a processor list some template pool element references -- an unwired swap
   list never fires;
 * ``advanced_random_spread`` with an explicit ``structure_id`` must point at a
-  structure in the owning set's ``structures`` list.
+  structure in the owning set's ``structures`` list; both its spacing pairs must
+  be ordered (``spacing > separation``); its ``when_replacing`` block must name
+  a preset that exists, like the two above; and a set that places a replacement
+  structure with no ``when_replacing`` at all is warned about, because it
+  replaces vanilla at its own density.
 """
 from __future__ import annotations
 
@@ -144,12 +148,76 @@ def _check_conditional_rings(project: Project, manifest, errors: list[str], warn
             errors.append(f"  [ERROR] {where}: structure_id = {sid!r} does not resolve to a real structure")
 
 
-def _check_advanced_random_spread(project: Project, errors: list[str]) -> None:
+def _set_structures(data: dict) -> set[str]:
+    return {
+        s.get("structure") for s in (data.get("structures") or [])
+        if isinstance(s, dict) and isinstance(s.get("structure"), str)
+    }
+
+
+def _replacement_structures(manifest: rv.ReplaceVanillaFile | None) -> set[str]:
+    if manifest is None:
+        return set()
+    return {r.replacement_structure for r in manifest.replacements
+            if r.replacement_structure is not None}
+
+
+def _check_spacing_pair(block: dict, where: str, prefix: str, errors: list[str]) -> None:
+    """``spacing`` must exceed ``separation``; MSL rejects the pack at load otherwise."""
+    spacing = block.get("spacing")
+    separation = block.get("separation")
+    if isinstance(spacing, int) and isinstance(separation, int) and spacing <= separation:
+        errors.append(
+            f"  [ERROR] {where}: {prefix}spacing ({spacing}) must be greater than "
+            f"{prefix}separation ({separation}) (datapack load fails otherwise)"
+        )
+
+
+def _check_advanced_random_spread(project: Project, manifest, errors: list[str],
+                                  warnings: list[str]) -> None:
+    ns = project.namespace
+    preset_keys = _preset_keys(manifest)
+    replacements = _replacement_structures(manifest)
+
     for rel, data in _walk(project, project.structure_set_dir):
         placement = data.get("placement")
         if not isinstance(placement, dict) or placement.get("type") != "moogs_structures:advanced_random_spread":
             continue
         where = f"structure_set/{rel}"
+
+        _check_spacing_pair(placement, where, "", errors)
+
+        # The optional when_replacing override. Shape is the schema's job; this
+        # is the pair MSL rejects at load, the preset it can never match, and
+        # the set that stands in for vanilla at its own far sparser density.
+        when = placement.get("when_replacing")
+        if isinstance(when, dict):
+            _check_spacing_pair(when, where, "when_replacing.", errors)
+
+            modid = when.get("modid")
+            vk = when.get("vanilla_key")
+            if isinstance(modid, str) and isinstance(vk, str):
+                if modid == ns:
+                    if vk not in preset_keys:
+                        errors.append(
+                            f"  [ERROR] {where}: when_replacing (modid={modid!r}, vanilla_key={vk!r}) "
+                            f"has no matching preset in replace_vanilla.json "
+                            f"(the replacing spacing is never used)"
+                        )
+                else:
+                    warnings.append(
+                        f"  [WARN] {where}: when_replacing (modid={modid!r}, vanilla_key={vk!r}) "
+                        f"targets another mod's preset; can't verify from this pack"
+                    )
+        elif when is None:
+            owned = _set_structures(data) & replacements
+            if owned:
+                warnings.append(
+                    f"  [WARN] {where}: this set places {sorted(owned)[0]}, a replace_vanilla "
+                    f"replacement, but the placement has no 'when_replacing' block "
+                    f"(the set keeps its normal density while replacing vanilla)"
+                )
+
         sid = placement.get("structure_id")
         if not isinstance(sid, str):
             continue
@@ -157,10 +225,7 @@ def _check_advanced_random_spread(project: Project, errors: list[str]) -> None:
         if not _structure_exists(project, sid):
             errors.append(f"  [ERROR] {where}: structure_id = {sid!r} does not resolve to a real structure")
 
-        own_structures = {
-            s.get("structure") for s in (data.get("structures") or [])
-            if isinstance(s, dict) and isinstance(s.get("structure"), str)
-        }
+        own_structures = _set_structures(data)
         if own_structures and sid not in own_structures:
             errors.append(
                 f"  [ERROR] {where}: structure_id = {sid!r} is not in this set's structures list "
@@ -249,7 +314,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     warnings: list[str] = []
 
     _check_conditional_rings(project, manifest, errors, warnings)
-    _check_advanced_random_spread(project, errors)
+    _check_advanced_random_spread(project, manifest, errors, warnings)
     _check_vanilla_loot_swap(ctx, svc, manifest, errors, warnings)
 
     for msg in warnings:

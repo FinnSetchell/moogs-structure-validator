@@ -199,6 +199,106 @@ def test_advanced_spread_structure_id_missing_json_fails(tmp_path):
     assert not passed
 
 
+# ---------- advanced_random_spread when_replacing ----------
+
+def _when_replacing(**overrides) -> dict:
+    block = {"modid": "test", "vanilla_key": "desert_pyramid", "spacing": 40, "separation": 8}
+    block.update(overrides)
+    return block
+
+
+def _pyramid_set(tmp_path, placement) -> None:
+    """A set placing test:my_pyramid, which replace_vanilla.json names as the
+    replacement for the desert pyramid."""
+    _write_structure(tmp_path, "test:my_pyramid")
+    _write_manifest(tmp_path, [_pyramid_preset()])
+    _write_set(tmp_path, "test:pyramid_set", placement,
+               structures=[{"structure": "test:my_pyramid", "weight": 1}])
+
+
+def test_when_replacing_spacing_greater_than_separation_passes(tmp_path):
+    _pyramid_set(tmp_path, _spread(when_replacing=_when_replacing()))
+    passed, _ = mod.run(_ctx(tmp_path))
+    assert passed
+
+
+def test_when_replacing_spacing_equal_to_separation_fails(tmp_path, capsys):
+    _pyramid_set(tmp_path, _spread(when_replacing=_when_replacing(spacing=8, separation=8)))
+    passed, _ = mod.run(_ctx(tmp_path))
+    out = capsys.readouterr().out
+    assert not passed
+    assert "when_replacing.spacing" in out
+
+
+def test_when_replacing_spacing_less_than_separation_fails(tmp_path):
+    _pyramid_set(tmp_path, _spread(when_replacing=_when_replacing(spacing=4, separation=8)))
+    passed, _ = mod.run(_ctx(tmp_path))
+    assert not passed
+
+
+def test_replacement_set_without_when_replacing_warns(tmp_path, capsys):
+    _pyramid_set(tmp_path, _spread())
+    passed, _ = mod.run(_ctx(tmp_path))
+    out = capsys.readouterr().out
+    assert passed  # warn only
+    assert "WARN" in out and "when_replacing" in out
+
+
+def test_when_replacing_matching_preset_passes(tmp_path):
+    _pyramid_set(tmp_path, _spread(when_replacing=_when_replacing(vanilla_key="desert_pyramid")))
+    passed, _ = mod.run(_ctx(tmp_path))
+    assert passed
+
+
+def test_when_replacing_no_matching_preset_fails(tmp_path, capsys):
+    _pyramid_set(tmp_path, _spread(when_replacing=_when_replacing(vanilla_key="jungle_pyramid")))
+    passed, _ = mod.run(_ctx(tmp_path))
+    out = capsys.readouterr().out
+    assert not passed
+    assert "no matching preset" in out and "jungle_pyramid" in out
+
+
+def test_when_replacing_other_modid_warns_not_errors(tmp_path, capsys):
+    _pyramid_set(tmp_path, _spread(when_replacing=_when_replacing(modid="othermod")))
+    passed, _ = mod.run(_ctx(tmp_path))
+    out = capsys.readouterr().out
+    assert passed
+    assert "WARN" in out and "othermod" in out
+
+
+# ---------- base spacing / separation ----------
+
+def test_base_spacing_greater_than_separation_passes(tmp_path):
+    _write_set(tmp_path, "test:s", _spread(spacing=20, separation=4))
+    passed, _ = mod.run(_ctx(tmp_path))
+    assert passed
+
+
+def test_base_spacing_equal_to_separation_fails(tmp_path, capsys):
+    _write_set(tmp_path, "test:s", _spread(spacing=4, separation=4))
+    passed, _ = mod.run(_ctx(tmp_path))
+    out = capsys.readouterr().out
+    assert not passed
+    assert "spacing (4) must be greater than separation (4)" in out
+
+
+def test_base_spacing_less_than_separation_fails(tmp_path):
+    _write_set(tmp_path, "test:s", _spread(spacing=2, separation=9))
+    passed, _ = mod.run(_ctx(tmp_path))
+    assert not passed
+
+
+def test_non_replacement_set_without_when_replacing_is_silent(tmp_path, capsys):
+    _write_structure(tmp_path, "test:my_pyramid")
+    _write_manifest(tmp_path, [_pyramid_preset()])
+    _write_set(tmp_path, "test:other_set", _spread(),
+               structures=[{"structure": "test:other", "weight": 1}])
+    passed, _ = mod.run(_ctx(tmp_path))
+    out = capsys.readouterr().out
+    assert passed
+    assert "when_replacing" not in out
+
+
 # ---------- vanilla_loot_swap_processor ----------
 
 def _swap(**overrides) -> dict:
