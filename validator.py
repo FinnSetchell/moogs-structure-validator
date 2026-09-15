@@ -53,6 +53,7 @@ CHECK_NAMES = [
     "check_no_spawn_eggs",
     "check_no_enchanted_books",
     "check_no_particles",
+    "check_merchant_offers",
 ]
 
 
