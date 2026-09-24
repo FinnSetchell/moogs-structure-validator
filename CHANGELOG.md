@@ -1,5 +1,12 @@
 # changelog
 
+## Unreleased
+
+### Added
+- **Overlay packs can pass CI.** A compat or overlay pack, such as the Moog's End Structures Biomes O' Plenty pack, ships structure files and pool overrides for a parent mod and nothing else. `check_data_integrity` failed it with "required directory missing" and `check_loot_tables` with "loot table directory missing", so it could never go green. A new `validator.json` option, `"overlay": true`, declares such a pack. With it, the directories a full mod must have are optional, and a reference in the pack's namespace that the pack does not ship (a pool, a structure file, a loot table, a vault or trial spawner config) is listed as expected from the parent mod instead of failing or warning. Everything the pack does ship is checked as strictly as before. Without the option nothing changes: output was compared byte-for-byte on all twenty fleet projects and the compat pack. (#2)
+
+  A per-namespace "supplied by a dependency" option, also suggested in #2, would not help the case that prompted it: the Biomes O' Plenty pack uses the parent's own namespace, `mes`.
+
 ## v1.11.1 -- 2026-09-13
 
 ### Fixed

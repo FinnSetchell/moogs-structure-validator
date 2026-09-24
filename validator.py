@@ -75,6 +75,8 @@ def load_config(config_path: Path) -> dict:
         raise ValueError("config missing required string field 'namespace'")
     if not isinstance(cfg.get("mc_versions"), list) or not cfg["mc_versions"]:
         raise ValueError("config missing required non-empty list field 'mc_versions'")
+    if "overlay" in cfg and not isinstance(cfg["overlay"], bool):
+        raise ValueError("config field 'overlay' must be true or false")
     return cfg
 
 
@@ -233,11 +235,14 @@ def main() -> None:
         extra_ids_raw=cfg.get("extra_ids", []),
         project_root=Path(str(args.project_root).strip('"')),
         refresh=args.refresh,
+        overlay=cfg.get("overlay", False),
     )
     ctx.extra_ids = resolve_extra_ids(ctx.extra_ids_raw, ctx.project_root)
 
     versions_str = ", ".join(ctx.mc_versions)
     print(f"Project: {ctx.namespace}  (versions: {versions_str})")
+    if ctx.overlay:
+        print("  overlay pack: references this pack cannot resolve are left to the mod it extends")
 
     svc = services(ctx)
     svc.mcmeta.cache_dir.mkdir(exist_ok=True)

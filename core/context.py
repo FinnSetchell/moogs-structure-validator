@@ -30,6 +30,9 @@ class ValidatorContext:
     valid_items: set[str] = field(default_factory=set)
     valid_entities: set[str] = field(default_factory=set)
     orphan_nbts: set[Path] = field(default_factory=set)
+    # An overlay pack extends another mod instead of standing alone (a compat or
+    # overlay pack). See Project.overlay.
+    overlay: bool = False
 
 
 class FileRange:
@@ -51,7 +54,8 @@ class FileRange:
 class Services:
     def __init__(self, ctx) -> None:
         self.ctx = ctx
-        self.project = Project(Path(ctx.project_root), ctx.namespace)
+        self.project = Project(Path(ctx.project_root), ctx.namespace,
+                               overlay=bool(getattr(ctx, "overlay", False)))
         self.mc_versions: list[str] = list(getattr(ctx, "mc_versions", []) or [])
         self.refresh: bool = bool(getattr(ctx, "refresh", False))
         self.mcmeta = Mcmeta(self.mc_versions, CACHE_DIR, self.refresh)

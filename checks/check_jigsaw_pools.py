@@ -6,6 +6,11 @@ least one targeted version, per misode/mcmeta's ``worldgen/template_pool``
 registry (when that registry cannot be fetched, vanilla pools are taken as
 valid, as they always were). Any other namespace warns: it cannot be verified
 from this pack.
+
+In an overlay pack (``"overlay": true``) a pool in our namespace that the pack
+does not ship is the parent mod's to provide, which is the normal shape for a
+jigsaw that hands back to the parent's pieces. Those are counted in one line
+rather than warned about one by one.
 """
 from __future__ import annotations
 
@@ -42,6 +47,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
     vanilla_pools = _vanilla_pools(svc)
     warnings: list[str] = []
+    from_parent: set[str] = set()
     jigsaw_count = 0
 
     for nbt_path in store.checked_files():
@@ -72,6 +78,9 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             if ns == ctx.namespace:
                 if pool in known_pools:
                     continue
+                if project.overlay:
+                    from_parent.add(pool)
+                    continue
                 reason = "pool not found"
             elif ns == "minecraft":
                 if vanilla_pools is None or pool in vanilla_pools:
@@ -83,6 +92,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
     for msg in warnings:
         print(f"  [WARN] jigsaw pool: {msg}")
+    if from_parent:
+        print(f"  {len(from_parent)} pool(s) not in this pack (expected from the parent mod)")
 
     if jigsaw_count == 0:
         print("  no jigsaw blocks found")
@@ -94,4 +105,6 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         if warnings
         else f"{jigsaw_count} jigsaw block(s), all valid"
     )
+    if from_parent:
+        summary += f" ({len(from_parent)} pool(s) from the parent mod)"
     return True, summary

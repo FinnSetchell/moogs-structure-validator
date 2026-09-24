@@ -67,8 +67,24 @@ Place `validator.json` at the root of each mod project:
 | `namespace` | The mod's datapack namespace |
 | `mc_versions` | Every MC version this mod targets; drives registry fetching and versioned NBT logic |
 | `extra_ids` | Additional IDs to treat as valid: exact (`"create:copper_ingot"`), wildcard namespace (`"biomesoplenty:*"`), or file reference (`"@allowed_ids.json"`) |
+| `overlay` | Optional, default `false`. Set `true` for a pack that extends another mod instead of standing alone, such as a compat pack shipping structure files and pool overrides for a parent mod. See below. |
 
 `@allowed_ids.json` is a flat JSON array of strings (wildcards allowed) at the project root.
+
+### Overlay packs
+
+A compat or overlay pack ships only part of a data pack, usually in its parent mod's namespace: no loot tables, no `worldgen/structure`, no `structure_set`. Its jigsaws and chests point at pools and loot tables the parent provides. The validator cannot see the parent, so with `"overlay": true`:
+
+- `check_data_integrity` requires none of its four directories; a step whose directory is absent reports "not in this pack", and a reference in the pack's namespace that does not resolve inside the pack is listed as expected from the parent mod instead of failing. Orphaned structure files still warn, and MSL element keys are still errors.
+- `check_loot_tables` accepts a missing `loot_table` directory and lists the pack's-namespace loot tables it does not ship.
+- `check_jigsaw_pools` counts pools in the pack's namespace that it does not ship in one line instead of warning per jigsaw.
+- `check_processor_rules` skips vault loot tables and trial spawner configs the pack does not ship.
+
+Every other check, and everything the pack does ship, is checked exactly as for a full mod. References to any other namespace are treated as before.
+
+```json
+{ "namespace": "mes", "mc_versions": ["1.21.2", "26.2"], "extra_ids": ["biomesoplenty:*"], "overlay": true }
+```
 
 ---
 

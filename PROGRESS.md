@@ -1,3 +1,6 @@
+## Unreleased
+- [x] `"overlay": true` in `validator.json` (#2): `check_data_integrity`, `check_loot_tables`, `check_jigsaw_pools` and `Project.resource_exists` treat pack-namespace references the pack does not ship as the parent mod's; required directories optional. `tests/test_overlay.py`. Byte-identical output without the option across 21 projects
+
 ## v1.11.1 (2026-09-13)
 - [x] `data/entity_nbt_keys.json` -- painting `variant` rule removed (the `Motive` -> `variant` rename is 1.19/22w16a, DV 3091, before every supported version); `Motive` kept as dead everywhere (`max_dv` 3090). Checked against misode/technical-changes and the mcmeta version index; vanilla's own structure files carry no paintings to check against; the corrected rule surfaces 3 `Motive` paintings in MNS2 1.20-datapack that the old one passed
 

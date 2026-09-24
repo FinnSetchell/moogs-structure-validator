@@ -10,6 +10,14 @@ structure sets, in both directions:
    places can never generate, and the failure is silent);
 6. every pool ``fallback`` in our namespace exists;
 7. MSL pool elements use ``element_type`` rather than ``type``.
+
+An overlay pack (``"overlay": true`` in ``validator.json``) ships only part of
+a data pack for a mod it extends, usually in that mod's namespace. None of the
+four directories is required, a step whose directory is absent reports "not in
+this pack", and a reference in steps 1 and 3-6 that does not resolve inside
+the pack is listed as expected from the parent mod instead of failing: the
+validator cannot see the parent. Step 2 (orphans) and step 7 (element keys) are
+about the pack's own files and behave as for any mod.
 """
 from __future__ import annotations
 
@@ -188,8 +196,73 @@ def _report(step: str, label: str, errors: list[str], noun: str, indent: str = "
     return False
 
 
+def _report_outside(step: str, label: str, refs: list[str]) -> None:
+    """An overlay pack's unresolved references: listed, never a failure."""
+    if refs:
+        print(f"  {step} {label}{len(refs)} not in this pack (expected from the parent mod):")
+        for r in refs:
+            print(f"          {r}")
+    else:
+        print(f"  {step} {label}OK")
+
+
+def _run_overlay(project: Project) -> tuple[bool, str]:
+    have_structures = project.structures_dir.exists()
+    have_pools = project.template_pool_dir.exists()
+    have_worldgen = project.worldgen_structure_dir.exists()
+    have_sets = project.structure_set_dir.exists()
+
+    def absent(step: str, label: str) -> None:
+        print(f"  {step} {label}not in this pack")
+
+    outside = 0
+
+    def step(num: str, label: str, present: bool, compute) -> None:
+        nonlocal outside
+        if not present:
+            absent(num, label)
+            return
+        refs = compute()
+        outside += len(refs)
+        _report_outside(num, label, refs)
+
+    step("[1/7]", "Pool -> NBT        ", have_pools, lambda: _check_pool_to_nbt(project))
+
+    orphans: list[str] = []
+    if have_structures and have_pools:
+        orphans = _check_orphaned_nbt(project)
+        _report("[2/7]", "Orphaned NBT       ", orphans, "unreferenced")
+    else:
+        absent("[2/7]", "Orphaned NBT       ")
+
+    step("[3/7]", "Structure -> Pool  ", have_worldgen, lambda: _check_structure_to_pool(project))
+    step("[4/7]", "Set -> Structure   ", have_sets, lambda: _check_set_to_structure(project))
+    step("[5/7]", "Structure -> Set   ", have_worldgen, lambda: _check_structure_placed(
+        project.worldgen_structure_dir, project.data_root, project.namespace_root, project.namespace, project,
+    ))
+    step("[6/7]", "Pool fallbacks     ", have_pools, lambda: _check_pool_fallbacks(project))
+
+    failed = False
+    if have_pools:
+        failed = _report("[7/7]", "MSL element keys   ", _check_msl_element_key(project), "bad", indent="")
+    else:
+        absent("[7/7]", "MSL element keys   ")
+
+    if failed:
+        return False, "cross-reference errors found"
+    notes = []
+    if orphans:
+        notes.append(f"{len(orphans)} orphan warning")
+    if outside:
+        notes.append(f"{outside} expected from the parent mod")
+    summary = "all cross-references OK"
+    return True, f"{summary}  ({', '.join(notes)})" if notes else summary
+
+
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
     project = services(ctx).project
+    if project.overlay:
+        return _run_overlay(project)
 
     for d in [project.structures_dir, project.template_pool_dir,
               project.worldgen_structure_dir, project.structure_set_dir]:

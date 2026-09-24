@@ -1,4 +1,9 @@
-"""Every ``LootTable`` a structure file names in our namespace exists on disk."""
+"""Every ``LootTable`` a structure file names in our namespace exists on disk.
+
+In an overlay pack (``"overlay": true``) the loot table directory is optional,
+and a loot table in our namespace that the pack does not ship is listed as
+expected from the parent mod rather than failing.
+"""
 from __future__ import annotations
 
 import collections
@@ -21,7 +26,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     if not structure_dir.exists():
         print(f"  structure directory not found: {structure_dir}")
         return False, "structure directory missing"
-    if not loot_table_dir.exists():
+    overlay = project.overlay
+    if not loot_table_dir.exists() and not overlay:
         print(f"  loot table directory not found: {loot_table_dir}")
         return False, "loot table directory missing"
 
@@ -40,6 +46,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         all_refs |= tables
 
     missing: dict[str, list[str]] = collections.defaultdict(list)
+    from_parent: dict[str, list[str]] = collections.defaultdict(list)
     minecraft_refs: dict[str, list[str]] = collections.defaultdict(list)
     other_refs: dict[str, list[str]] = collections.defaultdict(list)
 
@@ -56,7 +63,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         elif namespace == ctx.namespace:
             path = loc_to_path(ref, ctx.namespace, loot_table_dir, ".json")
             if path and not path.exists():
-                missing[ref].extend(users(ref))
+                (from_parent if overlay else missing)[ref].extend(users(ref))
         else:
             other_refs[ref].extend(users(ref))
 
@@ -76,6 +83,11 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     else:
         print(f"  no missing {ctx.namespace}: loot tables")
 
+    if from_parent:
+        print(f"  {len(from_parent)} {ctx.namespace}: loot table(s) not in this pack (expected from the parent mod):")
+        for ref in sorted(from_parent):
+            print(f"    {ref}")
+
     if minecraft_refs:
         print(f"  {len(minecraft_refs)} vanilla (minecraft:) loot table(s) referenced")
 
@@ -88,4 +100,6 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         summary = f"{with_loot} / {total} structures, {len(missing)} missing loot table(s)"
     else:
         summary = f"{with_loot} / {total} structures have loot tables"
+    if from_parent:
+        summary += f" ({len(from_parent)} from the parent mod)"
     return not missing, summary

@@ -76,9 +76,16 @@ def pool_locations(pool_data: dict) -> list[str]:
 
 
 class Project:
-    def __init__(self, project_root: Path, namespace: str) -> None:
+    def __init__(self, project_root: Path, namespace: str, overlay: bool = False) -> None:
         self.root = Path(project_root)
         self.namespace = namespace
+        # An overlay pack adds to or replaces content of another mod, usually in
+        # that mod's own namespace, and ships only part of a data pack. A
+        # reference in our namespace that does not resolve inside the pack may be
+        # the other mod's, which the validator cannot see, so it is reported as
+        # "not in this pack" rather than as missing, and directories a full mod
+        # must have are optional.
+        self.overlay = overlay
         self.data_root = self.root / "src" / "main" / "resources" / "data"
         self.namespace_root = self.data_root / namespace
         self._listings: dict[tuple[str, str], list[Path]] = {}
@@ -198,8 +205,13 @@ class Project:
 
     def resource_exists(self, ref: str, data_type: str) -> bool | None:
         """Whether ``ref`` names a JSON resource of ``data_type`` in this project.
-        None when the ref is not in our namespace (nothing to check locally)."""
+        None when that cannot be told from here: the ref is in another namespace,
+        or this is an overlay pack and the resource is not in it (the mod it
+        extends may provide it)."""
         ns, _, path = namespaced(ref).partition(":")
         if ns != self.namespace:
             return None
-        return any((d / f"{path}.json").exists() for d in self.all_data_dirs(data_type))
+        found = any((d / f"{path}.json").exists() for d in self.all_data_dirs(data_type))
+        if not found and self.overlay:
+            return None
+        return found
