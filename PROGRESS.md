@@ -1,4 +1,7 @@
-## Unreleased
+## v1.12.0 (2026-09-24)
+- [x] `checks/check_merchant_offers.py` -- warn-only: structure merchants without saved `Offers` (MSL < 3.3.1 rolls them on the worldgen thread)
+- [x] MSL 3.3.0: replacement `options` block, `when_replacing` schema + spacing/preset checks, no-`when_replacing` warning; checked against MSL `ReplacementOptions`, `AdvancedRandomSpread` and `ReplaceVanillaManager` (26.1.0-26.1.2 branch)
+- [x] fleet: no verdict or exit-code change vs v1.11.1 across 21 projects; only new warnings
 - [x] `"overlay": true` in `validator.json` (#2): `check_data_integrity`, `check_loot_tables`, `check_jigsaw_pools` and `Project.resource_exists` treat pack-namespace references the pack does not ship as the parent mod's; required directories optional. `tests/test_overlay.py`. Byte-identical output without the option across 21 projects
 
 ## v1.11.1 (2026-09-13)

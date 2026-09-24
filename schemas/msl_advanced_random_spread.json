@@ -33,7 +33,7 @@
 
     "when_replacing": {
       "type": "object",
-      "description": "Optional (MSL 3.1.3+). Spacing and separation used instead of the base pair while the (modid, vanilla_key) preset is enabled, so a replacement can inherit the density of the vanilla structure it stands in for.",
+      "description": "Optional (MSL 3.3.0+). Spacing and separation used instead of the base pair while the (modid, vanilla_key) preset is enabled, so a replacement can inherit the density of the vanilla structure it stands in for.",
       "required": ["modid", "vanilla_key", "spacing", "separation"],
       "additionalProperties": false,
       "properties": {

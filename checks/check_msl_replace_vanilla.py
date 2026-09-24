@@ -78,7 +78,7 @@ _TAG_HOOKUPS: dict[str, str] = {
 _ID_RE = re.compile(r"^[a-z0-9_.-]+:[a-z0-9_./-]+$")
 _PLACEHOLDER_RE = re.compile(r"\{([^{}]+)\}")
 
-# Per-replacement fidelity switches (MSL 3.1.3+). Each defaults to true when
+# Per-replacement fidelity switches (MSL 3.3.0+). Each defaults to true when
 # absent and the whole block is optional, so a misspelled key is invisible at
 # runtime: MSL logs one warning and keeps the default, meaning the behaviour the
 # author meant to switch OFF stays on.
