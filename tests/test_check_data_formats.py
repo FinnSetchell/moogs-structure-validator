@@ -352,3 +352,78 @@ def test_a_stale_version_index_is_refetched_before_claims_are_read(tmp_path, mon
     passed, summary = _run(root, ["1.21", "1.21.1", "26.2"])
     assert True in calls
     assert not passed and "on 26.3" in summary
+
+
+# --- the MSL a mod runs with ---------------------------------------------------------
+
+def _msl_project(tmp_path: Path, files: dict, fabric: str, gradle: str | None = None) -> Path:
+    root = _project(tmp_path, files)
+    res = root / "src" / "main" / "resources"
+    _write(res / "fabric.mod.json", {"id": "test", "depends": {"moogs_structures": fabric}})
+    (res / "META-INF").mkdir(parents=True, exist_ok=True)
+    (res / "META-INF" / "neoforge.mods.toml").write_text(
+        '[[dependencies.test]]\nmodId = "moogs_structures"\nmandatory = true\n'
+        'versionRange = "${structure_lib_version_range}"\n', encoding="utf-8")
+    if gradle is not None:
+        (root / "gradle.properties").write_text(f"structure_lib_version_range={gradle}\n", encoding="utf-8")
+    return root
+
+
+def test_declared_minimum_is_the_lowest_any_loader_allows(tmp_path):
+    root = _msl_project(tmp_path, {}, fabric=">=3.3.0", gradle="[3.0.0,)")
+    low, sources = msl_upgrade.declared_minimum(root)
+    assert low == (3, 0, 0)
+    assert any("fabric.mod.json" in s for s in sources) and any("gradle.properties" in s for s in sources)
+    assert msl_upgrade.range_floor("*") == (0, 0, 0)
+    assert msl_upgrade.range_floor("^3.1") == (3, 1, 0)
+    assert msl_upgrade.range_floor("${structure_lib_version_range}") is None
+
+
+def test_msl_features_follow_the_oldest_build_a_mod_can_run_with(tmp_path):
+    data = {"oldest_build": {"1.21.1": "1.0.0", "26.3": "3.3.0"},
+            "features": {"legacy_data_upgrade": {"what": "x", "mc_from": "26.3", "msl_from": "3.3.0"},
+                         "trial_spawner_configs": {"what": "y", "mc_from": "1.21", "mc_until": "1.21.2",
+                                                   "msl_from": "3.0.0"}}}
+    path = tmp_path / "builds.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    b = msl_upgrade.MslBuilds(path)
+    # "*" on 26.3 still means 3.3.0 or newer: no older MSL exists there.
+    assert b.applies("legacy_data_upgrade", "26.3", (0, 0, 0)) == (True, True)
+    assert b.applies("legacy_data_upgrade", "26.2", (0, 0, 0)) == (False, False)
+    # On 1.21.1 a "*" mod can run with MSL 1.0.0, which has no trial spawner configs.
+    assert b.applies("trial_spawner_configs", "1.21.1", (0, 0, 0)) == (True, False)
+    assert b.applies("trial_spawner_configs", "1.21.1", (3, 0, 0)) == (True, True)
+
+
+TRIAL = {"spawn_potentials": [{"weight": 1, "data": {"entity": {"id": "minecraft:zombie"}}}]}
+
+
+def test_msl_reads_trial_spawner_configs_before_vanilla_does(tmp_path, stubbed, capsys):
+    root = _msl_project(tmp_path, {"data/test/trial_spawner/arena.json": TRIAL}, fabric=">=3.0.0")
+    passed, summary = _run(root, ["1.21.1"])
+    out = capsys.readouterr().out
+    assert passed and "nothing reads this file" not in out, out
+    assert "which reads data/<ns>/trial_spawner" in out
+
+
+def test_a_minimum_below_the_msl_that_reads_them_is_reported(tmp_path, stubbed, capsys):
+    root = _msl_project(tmp_path, {"data/test/trial_spawner/arena.json": TRIAL}, fabric="*")
+    passed, summary = _run(root, ["1.21.1"])
+    out = capsys.readouterr().out
+    assert passed  # warnings only
+    assert "Raise the moogs_structures minimum to 3.0.0" in out
+    assert "nothing reads this file" in out
+
+
+def test_allowlisted_key_passes_and_the_same_key_elsewhere_does_not(tmp_path, stubbed, capsys):
+    harmless = {"type": "minecraft:item", "name": "minecraft:book",
+                "functions": [{"function": "minecraft:enchant_with_levels", "levels": 5, "only_compatible": True}]}
+    stray = {"type": "minecraft:item", "name": "minecraft:book",
+             "functions": [{"function": "minecraft:set_count", "count": 1, "only_compatible": True}]}
+    root = _project(tmp_path, {"data/test/loot_table/a.json": _table(harmless)})
+    passed, _ = _run(root, ["1.21"])
+    assert passed, capsys.readouterr().out
+    root2 = _project(tmp_path / "two", {"data/test/loot_table/b.json": _table(stray)})
+    passed, _ = _run(root2, ["1.21"])
+    assert not passed
+    assert "`only_compatible` is read by no version" in capsys.readouterr().out

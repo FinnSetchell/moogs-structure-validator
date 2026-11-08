@@ -25,6 +25,7 @@ anything outside the registries above.
 from __future__ import annotations
 
 import copy
+import re
 
 BLOCK_STATE_KINDS = frozenset({"worldgen/processor_list", "worldgen/template_pool", "worldgen/structure"})
 LOOT_KINDS = frozenset({"loot_table", "predicate", "item_modifier"})
@@ -154,28 +155,155 @@ def _upgrade_condition(element) -> int:
     return changes
 
 
-def requires_msl(resources_root) -> bool:
-    """Whether the mod declares Moog's Structure Lib as a dependency (it then
-    always runs alongside it, and on 26.3 MSL rewrites its data)."""
+# --- which MSL a mod runs with -------------------------------------------------------
+
+def _semver(text: str) -> tuple[int, ...] | None:
+    m = re.match(r"\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?", text)
+    if not m:
+        return None
+    return tuple(int(x or 0) for x in m.groups())
+
+
+def range_floor(spec: str) -> tuple[int, ...] | None:
+    """The lowest MSL version a dependency range allows.
+
+    Fabric/Quilt (``>=3.0.0``, ``^3.0.0``, ``~3.1``, ``*``) and Maven (``[3.0.0,)``)
+    ranges. ``*`` and an open lower bound mean any version: ``(0, 0, 0)``.
+    None when the range cannot be read (an unresolved placeholder).
+    """
+    spec = spec.strip()
+    if not spec or "${" in spec:
+        return None
+    if spec == "*":
+        return (0, 0, 0)
+    if spec[0] in "[(":
+        low = spec[1:].split(",", 1)[0].strip()
+        return _semver(low) if low else (0, 0, 0)
+    floors = []
+    for part in spec.split("||"):
+        part = part.strip()
+        low = None
+        for token in part.split():
+            for prefix in (">=", "^", "~", "=", ">"):
+                if token.startswith(prefix):
+                    low = _semver(token[len(prefix):])
+                    break
+            else:
+                if token[0].isdigit():
+                    low = _semver(token)
+            if low is not None:
+                break
+        floors.append(low if low is not None else (0, 0, 0))
+    return min(floors) if floors else None
+
+
+def declared_minimum(project_root) -> tuple[tuple[int, ...] | None, list[str]]:
+    """The lowest Moog's Structure Lib any of the mod's loader files allows,
+    and where each bound was read. ``(None, [])`` when the mod does not depend
+    on MSL at all."""
     import json
     from pathlib import Path
-    root = Path(resources_root)
-    fabric = root / "fabric.mod.json"
-    if fabric.is_file():
-        try:
-            meta = json.loads(fabric.read_text(encoding="utf-8-sig"))
-            if "moogs_structures" in (meta.get("depends") or {}):
-                return True
-        except (OSError, ValueError):
-            pass
+    root = Path(project_root)
+    res = root / "src" / "main" / "resources"
+    found: list[tuple[tuple[int, ...] | None, str]] = []
+
+    def add(spec, where):
+        found.append((range_floor(spec) if isinstance(spec, str) else None, f"{where} `{spec}`"))
+
+    try:
+        meta = json.loads((res / "fabric.mod.json").read_text(encoding="utf-8-sig"))
+        dep = (meta.get("depends") or {}).get("moogs_structures")
+        if dep is not None:
+            for spec in (dep if isinstance(dep, list) else [dep]):
+                add(spec, "fabric.mod.json")
+    except (OSError, ValueError):
+        pass
+    try:
+        meta = json.loads((res / "quilt.mod.json").read_text(encoding="utf-8-sig"))
+        for d in (meta.get("quilt_loader") or {}).get("depends") or []:
+            if isinstance(d, dict) and d.get("id") == "moogs_structures":
+                v = d.get("versions", "*")
+                for spec in (v if isinstance(v, list) else [v]):
+                    add(spec, "quilt.mod.json")
+    except (OSError, ValueError):
+        pass
+    props = {}
+    try:
+        for line in (root / "gradle.properties").read_text(encoding="utf-8").splitlines():
+            k, sep, v = line.partition("=")
+            if sep and not k.strip().startswith("#"):
+                props[k.strip()] = v.strip()
+    except OSError:
+        pass
     for toml in ("META-INF/neoforge.mods.toml", "META-INF/mods.toml"):
-        p = root / toml
-        if p.is_file():
-            try:
-                text = p.read_text(encoding="utf-8")
-            except OSError:
+        try:
+            text = (res / toml).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for block in re.split(r"\[\[dependencies\.", text)[1:]:
+            if not re.search(r"""modId\s*=\s*["']moogs_structures["']""", block):
                 continue
-            if 'modId = "moogs_structures"' in text or "modId='moogs_structures'" in text \
-                    or "modId = 'moogs_structures'" in text:
-                return True
-    return False
+            m = re.search(r"""versionRange\s*=\s*["']([^"']*)["']""", block)
+            spec = m.group(1) if m else "*"
+            ph = re.fullmatch(r"\$\{(\w+)\}", spec.strip())
+            if ph and ph.group(1) in props:
+                spec = props[ph.group(1)]
+                add(spec, f"{toml.split('/')[-1]} (gradle.properties {ph.group(1)})")
+            else:
+                add(spec, toml.split("/")[-1])
+    if not found:
+        return None, []
+    floors = [f for f, _ in found if f is not None]
+    return (min(floors) if floors else None), [w for _, w in found]
+
+
+class MslBuilds:
+    """``data/msl_builds.json``: the oldest MSL per Minecraft version, and from
+    which MSL release each of its data behaviours runs."""
+
+    def __init__(self, path=None):
+        import json
+        from pathlib import Path
+        path = Path(path) if path else Path(__file__).resolve().parent.parent / "data" / "msl_builds.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        self.oldest = {k: _semver(v) for k, v in data["oldest_build"].items()}
+        self.features = data["features"]
+
+    def oldest_build(self, version: str) -> tuple[int, ...] | None:
+        if version in self.oldest:
+            return self.oldest[version]
+        vt = _semver(version)
+        known = sorted((_semver(k), v) for k, v in self.oldest.items())
+        before = [v for k, v in known if k <= vt]
+        return before[-1] if before else None
+
+    def effective(self, version: str, declared: tuple[int, ...] | None) -> tuple[int, ...] | None:
+        """The oldest MSL a player can run this mod with on ``version``."""
+        oldest = self.oldest_build(version)
+        if declared is None:
+            return oldest
+        if oldest is None:
+            return declared
+        return max(declared, oldest)
+
+    def applies(self, feature: str, version: str, declared: tuple[int, ...] | None) -> tuple[bool, bool]:
+        """``(in this version's window, guaranteed by the MSL the mod allows)``."""
+        f = self.features[feature]
+        vt = _semver(version)
+        inside = vt >= _semver(f["mc_from"]) and ("mc_until" not in f or vt < _semver(f["mc_until"]))
+        if not inside:
+            return False, False
+        eff = self.effective(version, declared)
+        return True, eff is not None and eff >= _semver(f["msl_from"])
+
+
+def fmt(v: tuple[int, ...] | None) -> str:
+    return "any version" if v in (None, (0, 0, 0)) else ".".join(str(x) for x in v)
+
+
+def requires_msl(resources_root) -> bool:
+    """Whether the mod declares Moog's Structure Lib as a dependency."""
+    from pathlib import Path
+    root = Path(resources_root)
+    # resources_root is src/main/resources; declared_minimum wants the project root
+    return declared_minimum(root.parent.parent.parent)[1] != []

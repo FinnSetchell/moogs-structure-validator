@@ -1,0 +1,11 @@
+{
+  "about": "Keys no Minecraft version reads that check_data_formats lets pass anyway, because leaving them in changes nothing in game. Keep this short: every entry needs the reason it is harmless. A key the game ignores while the author meant it to do something (an `nbt` on a loot entry, `levels` on enchant_randomly) does not belong here.",
+  "keys": [
+    {
+      "kind": "loot_table",
+      "on": "minecraft:enchant_with_levels",
+      "key": "only_compatible",
+      "reason": "enchant_with_levels has never read `only_compatible` and only ever picks enchantments that fit the item, which is what `\"only_compatible\": true` asks for (MBS 1.20 base_loot_towers.json)"
+    }
+  ]
+}

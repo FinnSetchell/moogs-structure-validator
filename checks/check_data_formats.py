@@ -135,7 +135,14 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         return False, "format model missing"
 
     pack = Pack.read(resources, project.try_json)
-    uses_msl = msl_upgrade.requires_msl(resources)
+    # The MSL this mod runs with: the lowest its loader files allow (raised on
+    # each version to the oldest MSL published there; data/msl_builds.json).
+    msl_min, msl_sources = msl_upgrade.declared_minimum(project.root)
+    uses_msl = bool(msl_sources)
+    builds = msl_upgrade.MslBuilds() if uses_msl else None
+    allowed = _allowed_keys()
+    msl_relied: dict[str, set] = defaultdict(set)   # feature -> versions where the mod depends on it
+    msl_short: dict[str, set] = defaultdict(set)    # ... where it would, but allows an MSL without it
     raw_claims = list(getattr(ctx, "claims", []) or [])
     claims, problems, index = resolve_claims(svc.mcmeta, project.root, list(ctx.mc_versions), raw_claims, pack.meta)
     for p in problems:
@@ -158,7 +165,6 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     for v in unverified:
         print(f"  [ERROR] {v}: the format model has not been proven against this version's vanilla data, "
               f"so nothing here can say what {v} does with this pack. Run tools/update_format_model.py.")
-
     resource_kinds = set(model.symbols["mcdoc/dispatcher"].get("minecraft:resource", {}))
     # findings[(display path, kind, finding identity)] -> versions, finding
     found: dict[tuple, list] = {}
@@ -167,6 +173,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     dual = 0
     seen_dual: set[tuple] = set()
     gaps_applied = 0
+    allowed_hits: set[tuple] = set()
 
     # Versions whose answer must be identical share one reading: same model era,
     # same registries, same overlays.
@@ -176,7 +183,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         vt = parse_version(v)
         fmt = index.pack_format.get(v)
         key = (tuple(p <= vt for p in points), _registry_fingerprint(svc, v),
-               tuple(pack.active_overlays(fmt)), vt >= (1, 21))
+               tuple(pack.active_overlays(fmt)), vt >= (1, 21),
+               tuple(builds.applies(n, v, msl_min) for n in builds.features) if uses_msl else ())
         eras.setdefault(key, []).append(v)
 
     for key, group in eras.items():
@@ -213,31 +221,51 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                 fs = read_tag(data_json, res.tag_registry, reader)
             else:
                 t = reader.resource_type(res.kind)
+                if t is None and res.kind == "trial_spawner" and uses_msl:
+                    inside, guaranteed = builds.applies("trial_spawner_configs", v, msl_min)
+                    if inside and guaranteed:
+                        # Vanilla has no trial spawner registry yet; MSL reads the file
+                        # and its processor writes the config inline into the spawner.
+                        t = model.symbols["mcdoc/dispatcher"]["minecraft:resource"].get("trial_spawner")
+                        msl_relied["trial_spawner_configs"].update(group)
+                    elif inside:
+                        msl_short["trial_spawner_configs"].update(group)
                 if t is None:
                     f = Finding("", "no-such-kind", detail=(
                         f"this version has no `{res.kind}` data, so nothing reads this file here"))
                     found.setdefault((shown, res.kind, _identity(f)), [[], f])[0].extend(group)
                     continue
                 fs = reader.read(data_json, t)
-                if uses_msl and vt >= msl_upgrade.FIRST_VERSION:
-                    # The game reads this file after Moog's Structure Lib's rewrite.
+                inside, guaranteed = (builds.applies("legacy_data_upgrade", v, msl_min)
+                                      if uses_msl else (False, False))
+                if inside:
+                    # The game reads this file after Moog's Structure Lib's rewrite,
+                    # if the MSL the mod allows here does it.
                     upgraded, rewrites = msl_upgrade.upgrade(res.kind, data_json, reader._registry("block"))
                     if rewrites:
                         after = reader.read(upgraded, t)
                         kept = {_identity(x) for x in after}
                         rescued = [x for x in fs if _severity(x) == "ERROR" and _identity(x) not in kept
                                    and model.gap_for(res.kind, v, x) is None]
-                        if rescued:
-                            # Only when the rewrite changes what this version does:
-                            # rewrites inside a form this version ignores do not count.
+                        # Only when the rewrite changes what this version does:
+                        # rewrites inside a form this version ignores do not count.
+                        if rescued and guaranteed:
                             first = rescued[0]
                             f = Finding("", "msl-upgrade", detail=f"{first.path or '(file)'}: {_message(first)}")
                             found.setdefault((shown, res.kind, ("msl-upgrade",)), [[], f])[0].extend(group)
-                        fs = after
+                            msl_relied["legacy_data_upgrade"].update(group)
+                            fs = after
+                        elif rescued:
+                            msl_short["legacy_data_upgrade"].update(group)
+                        elif guaranteed:
+                            fs = after
             for f in fs:
                 gap = model.gap_for(res.kind, v, f)
                 if gap is not None and gap.get("scope") == "model":
                     gaps_applied += 1
+                    continue
+                if f.code == "unknown-key" and _is_allowed(allowed, res.kind, f):
+                    allowed_hits.add((shown, f.path))
                     continue
                 sev = _severity(f)
                 if sev is None:
@@ -247,6 +275,24 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                         dual += 1
                     continue
                 found.setdefault((shown, res.kind, _identity(f)), [[], f])[0].extend(group)
+
+    msl_short_warns: list[str] = []
+    if uses_msl:
+        print(f"  Moog's Structure Lib: this mod allows {msl_upgrade.fmt(msl_min)} "
+              f"({'; '.join(msl_sources)})")
+        for name, feat in builds.features.items():
+            what = feat["what"].split(" (")[0]
+            if msl_relied.get(name):
+                ok = sorted(msl_relied[name], key=order.index)
+                print(f"    on {_ranges(ok, order)} it runs with MSL "
+                      f"{msl_upgrade.fmt(builds.effective(ok[0], msl_min))} or newer, which {what}")
+            if msl_short.get(name):
+                short = sorted(msl_short[name], key=order.index)
+                print(f"  [WARN] on {_ranges(short, order)} this mod allows MSL "
+                      f"{msl_upgrade.fmt(builds.effective(short[0], msl_min))}, older than {feat['msl_from']}, "
+                      f"the first that {what}, so the files are read without it there. Raise the "
+                      f"moogs_structures minimum to {feat['msl_from']} to rely on it.")
+                msl_short_warns.append(name)
 
     # Report: errors first, grouped by file, versions folded into ranges.
     by_file: dict[tuple[str, str], list] = defaultdict(list)
@@ -313,6 +359,9 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         print(f"  {dual} key(s) written in two version forms, each version reading its own: fine")
     if gaps_applied:
         print(f"  {gaps_applied} finding(s) explained by known model gaps (data/format_model/model.json)")
+    if allowed_hits:
+        print(f"  {len(allowed_hits)} key(s) no version reads let through as harmless (data/allowed_keys.json)")
+    warns += len(msl_short_warns)
 
     failed = errors > 0 or bool(unverified) or bool(problems) or bool(unknown)
     parts = [f"{total_files} files x {len(checkable)} versions"]
@@ -325,6 +374,21 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     if not errors and not unverified:
         parts.append("0 errors")
     return not failed, ", ".join(parts)
+
+
+def _allowed_keys() -> list[dict]:
+    import json
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "data" / "allowed_keys.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("keys", [])
+    except (OSError, ValueError):
+        return []
+
+
+def _is_allowed(allowed: list[dict], kind: str, f: Finding) -> bool:
+    return any(a.get("kind") == kind and a.get("key") == f.key and a.get("on") in (None, f.on)
+               for a in allowed)
 
 
 def _identity(f: Finding) -> tuple:

@@ -198,6 +198,9 @@ class Finding:
     counterpart_present: bool = False
     # foreign-key only: the window in which the key *is* read, for messages.
     known_window: tuple = (None, None)
+    # unknown-key / foreign-key: the type id of the object the key sits on
+    # (a loot function's `function`, a processor's `processor_type` ...).
+    on: str | None = None
 
 
 _INDEX = re.compile(r"\[\d+\]")
@@ -667,7 +670,8 @@ class Reader:
                     break
         if not windows:
             if judge_keys and not every.open:
-                out.append(Finding(path, "unknown-key", key=k, detail=f"no version reads `{k}` here"))
+                out.append(Finding(path, "unknown-key", key=k, detail=f"no version reads `{k}` here",
+                                   on=_object_type(value)))
             return
         if flat_now.custom:
             return
@@ -702,7 +706,7 @@ class Reader:
         names = tuple(sorted(f.key for f in counterparts))
         present = any(n in value for n in names)
         out.append(Finding(path, "foreign-key", key=k, counterparts=names, counterpart_present=present,
-                           known_window=known))
+                           known_window=known, on=_object_type(value)))
 
     def _leaves(self, m, env, win, depth: int = 0):
         """Struct-like members of a (possibly nested) union, with their windows."""
@@ -784,6 +788,17 @@ class Reader:
         elif kind == "template":
             out |= self._signature(t.get("child"), env, depth + 1, seen)
         return out
+
+
+_TYPE_KEYS = ("function", "type", "condition", "processor_type", "element_type", "predicate_type")
+
+
+def _object_type(value: dict) -> str | None:
+    for k in _TYPE_KEYS:
+        v = value.get(k)
+        if isinstance(v, str) and v:
+            return normalize_id(v)
+    return None
 
 
 def _kind_name(value) -> str:
