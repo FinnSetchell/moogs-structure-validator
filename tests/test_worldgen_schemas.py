@@ -723,3 +723,43 @@ def test_a_pool_element_field_is_gated_too(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert not passed, out
     assert "mirroring_single_pool_element `enhanced_terrain_adaptation` first read by MSL 3.0.0" in out
+
+
+VERSIONED_WITH_CARVING = {"element_type": "moogs_structures:versioned_single_pool_element",
+                          "location": "test:start", "projection": "rigid", "processors": "minecraft:empty",
+                          "enhanced_terrain_adaptation": {"kernel_size": 4, "kernel_distance": 2,
+                                                          "top": "carve", "bottom": "none"}}
+
+
+def test_per_piece_carving_on_1_20_warns_and_passes(tmp_path, monkeypatch, capsys):
+    # No release of MSL's 1.20 lines reads a versioned element's own carving: it warns
+    # on 1.20-1.20.6 only, and the check still passes.
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "template_pool", "start.json", _pool([VERSIONED_WITH_CARVING]))
+    _msl_mod(tmp_path, ">=3.3.0")
+    passed, summary = mod.run(FakeContext("test", ["1.20.4", "1.20.6", "1.21", "1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert passed and "1 warning(s)" in summary, out
+    assert ("[WARN] moogs_structures:versioned_single_pool_element `enhanced_terrain_adaptation` "
+            "is skipped on 1.20.4-1.20.6") in out
+    assert "the structure-wide carving" in out and "template_pool/start.json" in out
+
+
+def test_per_piece_carving_on_1_21_is_silent(tmp_path, monkeypatch, capsys):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "template_pool", "start.json", _pool([VERSIONED_WITH_CARVING]))
+    _msl_mod(tmp_path, ">=3.3.0")
+    passed, summary = mod.run(FakeContext("test", ["1.21", "1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert passed and "warning" not in summary and "[WARN]" not in out, out
+
+
+def test_a_low_minimum_on_1_20_does_not_blame_the_release(tmp_path, monkeypatch, capsys):
+    # On 1.20 no MSL reads it, so raising the minimum would not help: no release error there.
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "template_pool", "start.json", _pool([VERSIONED_WITH_CARVING]))
+    _msl_mod(tmp_path, "*")
+    passed, _ = mod.run(FakeContext("test", ["1.20.4", "1.20.6"], tmp_path))
+    out = capsys.readouterr().out
+    assert passed, out
+    assert "first read by MSL" not in out and "[WARN]" in out

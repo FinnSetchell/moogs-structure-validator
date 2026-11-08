@@ -12,7 +12,8 @@ first shipped in a later MSL than the mod's declared ``moogs_structures`` minimu
 since with an older MSL the file names an unregistered type and fails to load
 (``_MSL_TYPE_SINCE``). The same goes for a field MSL added to a type later
 (``_MSL_FIELD_SINCE``): an older MSL skips it without a word, so what it sets is
-lost there.
+lost there. A field some Minecraft line of MSL never reads, in any release, warns
+on those versions (``_MSL_FIELD_WINDOWS``).
 
 Two ``y_allowance`` shapes a JSON schema cannot express are checked by hand:
 ``max_y_allowed`` below ``min_y_allowed`` (MSL rejects it at datapack load), and
@@ -116,6 +117,18 @@ _MSL_FIELD_SINCE: dict[tuple[str, str], tuple[int, int, int]] = {
     ("moogs_structures:mirroring_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
     ("moogs_structures:legacy_ocean_bottom_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
     ("moogs_structures:versioned_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
+}
+
+# Fields MSL reads on some Minecraft lines only, in every release: (first DataVersion
+# read, first DataVersion no longer read, what is lost), as _MSL_TYPE_WINDOWS. No
+# release of MSL's 1.20 lines (1.20-1.20.4 and 1.20.5-1.20.6, 3.0.0 to 3.4.x) reads a
+# versioned element's own terrain adaptation; the 1.21 lines do from 3.0.0. Raising
+# the minimum cannot help there, so it warns instead of failing.
+_MSL_FIELD_WINDOWS: dict[tuple[str, str], tuple[int | None, int | None, str]] = {
+    ("moogs_structures:versioned_single_pool_element", "enhanced_terrain_adaptation"): (
+        DV_1_21, None,
+        "MSL's 1.20 lines skip it on this pool element, so those pieces get no carving of their own "
+        "there; the structure-wide carving (the structure's own enhanced_terrain_adaptation) still applies"),
 }
 
 _schema_cache: dict[str, dict] = {}
@@ -361,6 +374,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     if n_msl:
         error_count += n_msl
         failed = True
+    warn_count = _check_msl_field_windows(ctx, svc, used_types)
 
     total = sum(counts.values())
     count_str = "  ".join(f"{k}: {v}" for k, v in counts.items() if v > 0)
@@ -373,16 +387,49 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         print(f"  ({count_str})")
 
     summary = f"{total} files, 0 errors" if error_count == 0 else f"{total} files, {error_count} error(s)"
+    if warn_count:
+        summary += f", {warn_count} warning(s)"
     return not failed, summary
 
 
-def _window_has(type_id: str, version_dv: int | None) -> bool:
-    """Whether MSL registers ``type_id`` on a version at all (its MC window)."""
-    window = _MSL_TYPE_WINDOWS.get(type_id)
-    if window is None or version_dv is None:
+def _window_has(key, version_dv: int | None) -> bool:
+    """Whether MSL reads a type (``type_id``) or a field (``(type_id, field)``) on a
+    version at all: its MC window, in any release."""
+    if version_dv is None:
         return True
-    added, removed = window
+    if not isinstance(key, str):
+        field = _MSL_FIELD_WINDOWS.get(key)
+        if field is not None and not _in_window(field[0], field[1], version_dv):
+            return False
+        key = key[0]
+    window = _MSL_TYPE_WINDOWS.get(key)
+    return window is None or _in_window(window[0], window[1], version_dv)
+
+
+def _in_window(added, removed, version_dv: int) -> bool:
     return (added is None or version_dv >= added) and (removed is None or version_dv < removed)
+
+
+def _check_msl_field_windows(ctx, svc, used: dict) -> int:
+    """Warnings for fields no release of MSL reads on some targeted versions."""
+    index = svc.versions if any(k in used for k in _MSL_FIELD_WINDOWS) else None
+    if index is None:
+        return 0
+    order = sorted((v for v in ctx.mc_versions if parse_version(v)), key=parse_version)
+    warns = 0
+    for key, (added, removed, why) in sorted(_MSL_FIELD_WINDOWS.items()):
+        if key not in used:
+            continue
+        skipped = [v for v in order if index.get(v) is not None and _window_has(key[0], index.get(v))
+                   and not _in_window(added, removed, index.get(v))]
+        if not skipped:
+            continue
+        warns += 1
+        files = sorted(used[key])
+        more = f" (+{len(files) - 3} more)" if len(files) > 3 else ""
+        print(f"  [WARN] {key[0]} `{key[1]}` is skipped on {_version_runs(skipped, order)}")
+        print(f"    {why}. In {', '.join(files[:3])}{more}.")
+    return warns
 
 
 def _check_msl_releases(ctx, svc, used: dict) -> int:
@@ -402,7 +449,7 @@ def _check_msl_releases(ctx, svc, used: dict) -> int:
         type_id = key if isinstance(key, str) else key[0]
         short = []
         for v in order:
-            if not _window_has(type_id, index.get(v) if index else None):
+            if not _window_has(key, index.get(v) if index else None):
                 continue
             eff = builds.effective(v, declared)
             if eff is not None and eff < since:
