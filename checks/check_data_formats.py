@@ -245,29 +245,30 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                     found.setdefault((shown, res.kind, _identity(f)), [[], f])[0].extend(group)
                     continue
                 fs = reader.read(data_json, t)
-                inside, guaranteed = (builds.applies("legacy_data_upgrade", v, msl_min)
-                                      if uses_msl else (False, False))
+                inside = builds.applies("legacy_data_upgrade", v, msl_min)[0] if uses_msl else False
                 if inside:
                     # The game reads this file after Moog's Structure Lib's rewrite,
-                    # if the MSL the mod allows here does it.
-                    upgraded, rewrites = msl_upgrade.upgrade(res.kind, data_json, reader._registry("block"))
-                    if rewrites:
-                        after = reader.read(upgraded, t)
-                        kept = {_identity(x) for x in after}
-                        rescued = [x for x in fs if _severity(x) == "ERROR" and _identity(x) not in kept
-                                   and model.gap_for(res.kind, v, x) is None]
-                        # Only when the rewrite changes what this version does:
-                        # rewrites inside a form this version ignores do not count.
-                        if rescued and guaranteed:
-                            first = rescued[0]
-                            f = Finding("", "msl-upgrade", detail=f"{first.path or '(file)'}: {_message(first)}")
-                            found.setdefault((shown, res.kind, ("msl-upgrade",)), [[], f])[0].extend(group)
-                            msl_relied["legacy_data_upgrade"].update(group)
-                            fs = after
-                        elif rescued:
-                            msl_short["legacy_data_upgrade"].update(group)
-                        elif guaranteed:
-                            fs = after
+                    # as done by the oldest MSL the mod allows on this version.
+                    blocks = reader._registry("block")
+                    eff = builds.effective(v, msl_min)
+                    up_eff, n_eff = msl_upgrade.upgrade(res.kind, data_json, blocks, eff)
+                    up_all, n_all = msl_upgrade.upgrade(res.kind, data_json, blocks, None)
+                    after_eff = reader.read(up_eff, t) if n_eff else fs
+                    after_all = reader.read(up_all, t) if n_all else fs
+                    kept_eff = {_identity(x) for x in after_eff}
+                    kept_all = {_identity(x) for x in after_all}
+                    raw_errors = [x for x in fs if _severity(x) == "ERROR" and model.gap_for(res.kind, v, x) is None]
+                    rescued = [x for x in raw_errors if _identity(x) not in kept_eff]
+                    # Only when the rewrite changes what this version does: rewrites
+                    # inside a form this version ignores do not count.
+                    if rescued:
+                        first = rescued[0]
+                        f = Finding("", "msl-upgrade", detail=f"{first.path or '(file)'}: {_message(first)}")
+                        found.setdefault((shown, res.kind, ("msl-upgrade",)), [[], f])[0].extend(group)
+                        msl_relied["legacy_data_upgrade"].update(group)
+                    if any(_identity(x) not in kept_all for x in raw_errors if _identity(x) in kept_eff):
+                        msl_short["legacy_data_upgrade"].update(group)   # a newer MSL would rescue more
+                    fs = after_eff
             for f in fs:
                 gap = model.gap_for(res.kind, v, f)
                 if gap is not None and gap.get("scope") == "model":

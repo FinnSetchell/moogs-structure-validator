@@ -33,6 +33,20 @@ NUMBER_FIELDS = frozenset({"rolls", "bonus_rolls", "count", "levels", "damage", 
                            "duration", "amount", "chance"})
 RENAMES = {"minecraft:chain": "minecraft:iron_chain"}
 
+# The first MSL release that has each rewrite. All arrived together in
+# LegacyDataUpgrader (tag 3.3.0-26.3, commit 2b31c44) and are unchanged through
+# 3.4.2. A rewrite MSL adds later goes here with its own release, so a mod is
+# only credited with it once its declared minimum reaches that release.
+REWRITE_SINCE = {
+    "block_states": (3, 3, 0),      # Name/Properties -> id/properties
+    "block_aliases": (3, 3, 0),     # chain -> iron_chain
+    "spawn_overrides": (3, 3, 0),   # minCount/maxCount -> count
+    "function_ids": (3, 3, 0),      # function -> type
+    "conditions": (3, 3, 0),        # conditions list -> condition (all_of)
+    "condition_ids": (3, 3, 0),     # condition -> type inside conditions
+    "number_ranges": (3, 3, 0),     # typeless {min, max} -> uniform
+}
+
 FIRST_VERSION = (26, 3)   # MSL's 26.3 builds are the first that carry the rewrite
 
 
@@ -40,26 +54,28 @@ def _primitive(v) -> bool:
     return not isinstance(v, (dict, list)) and v is not None
 
 
-def upgrade(kind: str, data, blocks: set[str] | None = None):
+def upgrade(kind: str, data, blocks: set[str] | None = None, msl: tuple[int, ...] | None = None):
     """``(rewritten copy, number of rewrites)``; the input is not touched.
 
     ``blocks`` is the version's block registry, for the rename that only fires
-    when the new id exists.
+    when the new id exists. ``msl`` is the MSL release doing the rewrite: only
+    the rewrites that release has run (None: all of them).
     """
     if not isinstance(data, dict):
         return data, 0
     if kind not in BLOCK_STATE_KINDS and kind not in LOOT_KINDS:
         return data, 0
+    on = {name: msl is None or msl >= since for name, since in REWRITE_SINCE.items()}
     root = copy.deepcopy(data)
     changes = 0
     if kind in BLOCK_STATE_KINDS:
-        changes += _rename_block_states(root, blocks)
-        if kind == "worldgen/structure":
+        changes += _rename_block_states(root, blocks, on)
+        if kind == "worldgen/structure" and on["spawn_overrides"]:
             changes += _upgrade_spawn_overrides(root)
     else:
-        if kind == "predicate":
-            changes += _upgrade_condition(root)
-        changes += _upgrade_loot_tree(root, None)
+        if kind == "predicate" and on["condition_ids"]:
+            changes += _upgrade_condition(root, on)
+        changes += _upgrade_loot_tree(root, None, on)
     return root, changes
 
 
@@ -70,24 +86,24 @@ def _alias(id_: str, blocks: set[str] | None) -> str:
     return id_
 
 
-def _rename_block_states(element, blocks) -> int:
+def _rename_block_states(element, blocks, on) -> int:
     changes = 0
     if isinstance(element, dict):
-        if "Name" in element and _primitive(element["Name"]) and "id" not in element:
+        if on["block_states"] and "Name" in element and _primitive(element["Name"]) and "id" not in element:
             element["id"] = element.pop("Name")
             if "Properties" in element and "properties" not in element:
                 element["properties"] = element.pop("Properties")
             changes += 1
-        if isinstance(element.get("id"), str):
+        if on["block_aliases"] and isinstance(element.get("id"), str):
             renamed = _alias(element["id"], blocks)
             if renamed != element["id"]:
                 element["id"] = renamed
                 changes += 1
         for v in list(element.values()):
-            changes += _rename_block_states(v, blocks)
+            changes += _rename_block_states(v, blocks, on)
     elif isinstance(element, list):
         for v in element:
-            changes += _rename_block_states(v, blocks)
+            changes += _rename_block_states(v, blocks, on)
     return changes
 
 
@@ -113,34 +129,35 @@ def _upgrade_spawn_overrides(structure: dict) -> int:
     return changes
 
 
-def _upgrade_loot_tree(element, parent_key) -> int:
+def _upgrade_loot_tree(element, parent_key, on) -> int:
     changes = 0
     if isinstance(element, dict):
-        if "function" in element and _primitive(element["function"]) and "type" not in element:
+        if on["function_ids"] and "function" in element and _primitive(element["function"]) and "type" not in element:
             element["type"] = element.pop("function")
             changes += 1
-        if isinstance(element.get("conditions"), list) and "condition" not in element:
+        if on["conditions"] and isinstance(element.get("conditions"), list) and "condition" not in element:
             conditions = element.pop("conditions")
-            for term in conditions:
-                changes += _upgrade_condition(term)
+            if on["condition_ids"]:
+                for term in conditions:
+                    changes += _upgrade_condition(term, on)
             if len(conditions) == 1:
                 element["condition"] = conditions[0]
             elif len(conditions) > 1:
                 element["condition"] = {"type": "minecraft:all_of", "terms": conditions}
             changes += 1
-        if (parent_key is not None and parent_key in NUMBER_FIELDS
+        if (on["number_ranges"] and parent_key is not None and parent_key in NUMBER_FIELDS
                 and "min" in element and "max" in element and "type" not in element):
             element["type"] = "minecraft:uniform"
             changes += 1
         for k, v in list(element.items()):
-            changes += _upgrade_loot_tree(v, k)
+            changes += _upgrade_loot_tree(v, k, on)
     elif isinstance(element, list):
         for v in element:
-            changes += _upgrade_loot_tree(v, parent_key)
+            changes += _upgrade_loot_tree(v, parent_key, on)
     return changes
 
 
-def _upgrade_condition(element) -> int:
+def _upgrade_condition(element, on) -> int:
     if not isinstance(element, dict):
         return 0
     changes = 0
@@ -149,9 +166,9 @@ def _upgrade_condition(element) -> int:
         changes += 1
     if isinstance(element.get("terms"), list):
         for term in element["terms"]:
-            changes += _upgrade_condition(term)
+            changes += _upgrade_condition(term, on)
     if "term" in element:
-        changes += _upgrade_condition(element["term"])
+        changes += _upgrade_condition(element["term"], on)
     return changes
 
 

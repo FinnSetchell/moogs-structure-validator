@@ -532,3 +532,16 @@ def test_a_key_that_only_arrives_later_is_a_warning(tmp_path, stubbed, capsys):
     root = _project(tmp_path, {"data/test/loot_table/a.json": _table(entry)})
     passed, summary = _run(root, ["1.21.1"])
     assert passed and "warning" in summary, capsys.readouterr().out
+
+
+def test_a_rewrite_newer_than_the_mods_msl_does_not_rescue(tmp_path, stubbed, monkeypatch, capsys):
+    # Pretend MSL only rewrote condition lists from 9.0.0: a mod allowing 3.x gets
+    # no credit for it, so the 26.3 error on the old pool conditions stands.
+    monkeypatch.setitem(msl_upgrade.REWRITE_SINCE, "conditions", (9, 0, 0))
+    table = _table(DUAL_ENTRY, conditions=[{"condition": "minecraft:random_chance", "chance": 0.5}])
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": table}, msl=True)
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed
+    assert "`conditions` is ignored" in out
+    assert "[ERROR] on 26.3 this mod allows MSL" in out
