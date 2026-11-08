@@ -26,8 +26,10 @@ VERSIONS = [
 ]
 
 REGISTRIES = {
-    "loot_function_type": ["set_count", "enchant_randomly", "enchant_with_levels"],
-    "loot_condition_type": ["random_chance", "survives_explosion", "all_of", "entity_properties"],
+    "loot_function_type": ["set_count", "enchant_randomly", "enchant_with_levels", "set_contents", "sequence",
+                           "filtered", "modify_contents", "exploration_map"],
+    "loot_condition_type": ["random_chance", "survives_explosion", "all_of", "any_of", "inverted",
+                            "entity_properties"],
     "item": ["diamond", "book", "iron_ingot", "stone"],
     "block": ["stone", "water", "iron_chain"],
     "worldgen/biome": ["plains", "desert"],
@@ -587,3 +589,24 @@ def test_unreadable_json_anywhere_under_data_fails(tmp_path, stubbed, capsys):
     out = capsys.readouterr().out
     assert not passed
     assert out.count("not valid JSON") == 3
+
+
+# --- second review (2026-11-08) --------------------------------------------------------
+
+def test_inline_table_in_set_contents_as_the_converter_writes_it_passes(tmp_path, stubbed, capsys):
+    # Exactly what MFR's scripts/loot_26_3.py writes for a box holding an inline
+    # table: the set_contents entries, and the table inside them, in 26.3 form only.
+    inner_old = {"type": "minecraft:item", "name": "minecraft:diamond",
+                 "functions": [{"function": "minecraft:set_count", "count": 2}],
+                 "conditions": [{"condition": "minecraft:random_chance", "chance": 0.5}]}
+    inner_new = {"type": "minecraft:item", "name": "minecraft:diamond",
+                 "modifier": {"type": "minecraft:set_count", "count": 2},
+                 "condition": {"type": "minecraft:random_chance", "chance": 0.5}}
+    box = {"type": "minecraft:item", "name": "minecraft:stone",
+           "functions": [{"function": "minecraft:set_contents", "component": "minecraft:container", "entries": [
+               {"type": "minecraft:loot_table", "value": {"pools": [{"rolls": 1, "entries": [inner_old]}]}}]}],
+           "modifier": {"type": "minecraft:set_contents", "component": "minecraft:container", "entries": [
+               {"type": "minecraft:loot_table", "value": {"pools": [{"rolls": 1, "entries": [inner_new]}]}}]}}
+    root = _project(tmp_path, {"data/test/loot_table/box.json": _table(box)})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    assert passed, capsys.readouterr().out

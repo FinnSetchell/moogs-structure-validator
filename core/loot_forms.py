@@ -163,22 +163,54 @@ class Converter:
             return "#" + tag
         return v   # not a tag: the converter keeps it and reports it
 
+    def _site_new_only(self, o: dict) -> dict:
+        """``functions`` / ``conditions`` replaced by the 26.3 keys built from them
+        (the script's ``with_new_keys`` then dropping the old keys)."""
+        if "functions" in o:
+            v = o.pop("functions")
+            o.pop("modifier", None)
+            m = self.function_list(v) if isinstance(v, list) else None
+            if m is not None:
+                o["modifier"] = m
+        if "conditions" in o:
+            v = o.pop("conditions")
+            o.pop("condition", None)
+            c = self.condition_list(v) if isinstance(v, list) else None
+            if c is not None:
+                o["condition"] = c
+        return o
+
+    def table_new_only(self, t):
+        """A table written inline inside a part only 26.3 reads: 26.3 form only
+        (the script's ``convert_table(only_new=True)``)."""
+        if not isinstance(t, dict):
+            return t
+        t = self._site_new_only(dict(t))
+        if isinstance(t.get("pools"), list):
+            pools = []
+            for p in t["pools"]:
+                if isinstance(p, dict):
+                    p = dict(p)
+                    if isinstance(p.get("entries"), list):
+                        p["entries"] = [self.entry_new_only(e) for e in p["entries"]]
+                    p = self._site_new_only(p)
+                pools.append(p)
+            t["pools"] = pools
+        return t
+
     def entry_new_only(self, e):
-        """An entry inside a part only 26.3 reads (a set_contents list): 26.3 form only."""
+        """An entry inside a part only 26.3 reads (a set_contents list): 26.3 form
+        only (the script's ``convert_entry(only_new=True)``)."""
         if not isinstance(e, dict):
             return e
         e = dict(e)
         if isinstance(e.get("children"), list):
             e["children"] = [self.entry_new_only(c) for c in e["children"]]
-        if "functions" in e:
-            m = self.function_list(e.pop("functions")) if isinstance(e.get("functions"), list) else None
-            if m is not None:
-                e["modifier"] = m
-        if "conditions" in e:
-            c = self.condition_list(e.pop("conditions")) if isinstance(e.get("conditions"), list) else None
-            if c is not None:
-                e["condition"] = c
+        if _short(e.get("type")) == "loot_table" and isinstance(e.get("value"), dict):
+            e["value"] = self.table_new_only(e["value"])
+        e = self._site_new_only(e)
         if _short(e.get("type")) == "tag" and isinstance(e.get("name"), str):
+            e.pop("items", None)
             e["items"] = _tagged(e.pop("name"))
         return e
 
