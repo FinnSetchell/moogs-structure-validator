@@ -10,6 +10,7 @@ ending at 26.2, which is how 26.3 shipped unchecked.
 """
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from core.claims import resolve_claims
@@ -47,11 +48,24 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         ms = sorted(missing_total, key=order.index)
         print(f"  [ERROR] claimed but never checked: {', '.join(ms)}. Add them to mc_versions in "
               f"validator.json so every check covers them.")
-    if not any(c.source != "validator.json" for c in claims):
-        print("  no claim beyond validator.json (no publish manifest target, declared pack range or --claim)")
+    no_claim = not any(c.source != "validator.json" for c in claims)
+    # In CI (and with --require-claim) a run must know the published window: a
+    # 1.20 branch's checkout has no manifest and only a bare pack_format, so
+    # without --claim nothing would compare validator.json with what ships.
+    require = bool(getattr(ctx, "require_claim", False)) or bool(os.environ.get("GITHUB_ACTIONS"))
+    if no_claim:
+        what = "no claim beyond validator.json (no publish manifest target, declared pack range or --claim)"
+        if require:
+            why = "--require-claim" if getattr(ctx, "require_claim", False) else "GITHUB_ACTIONS is set"
+            print(f"  [ERROR] {what}, and one is required ({why}): pass --claim START-END from the "
+                  f"publish manifest's target for this branch")
+        else:
+            print(f"  {what}")
 
-    failed = bool(missing_total or problems or unknown)
+    failed = bool(missing_total or problems or unknown or (no_claim and require))
     if failed:
         n = len(missing_total)
-        return False, f"{n} claimed version(s) not in validator.json" if n else "claims unreadable"
+        if n:
+            return False, f"{n} claimed version(s) not in validator.json"
+        return False, "no published window to check against" if no_claim and require else "claims unreadable"
     return True, f"{len(listed)} version(s), every claim covered"

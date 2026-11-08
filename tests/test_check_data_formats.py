@@ -50,6 +50,7 @@ def stubbed(monkeypatch):
     monkeypatch.setattr(mcmeta, "fetch_version_entries", fake_version_entries)
     monkeypatch.delenv("GITHUB_HEAD_REF", raising=False)
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
 
 
 def _write(path: Path, data) -> None:
@@ -487,3 +488,23 @@ def test_library_table_edited_in_one_form_only_fails(tmp_path, stubbed, capsys):
     assert not passed
     assert "pools[0].entries[0].modifier" in out and "enchant_randomly" in out
     assert "pools[0].entries[1].modifier" in out
+
+
+def test_require_claim_fails_without_a_published_window(tmp_path, stubbed, capsys):
+    root = _project(tmp_path, {})
+    ctx = FakeContext("test", ["1.21", "1.21.1"], root)
+    ctx.claims, ctx.require_claim = [], True
+    passed, summary = check_claimed_versions.run(ctx)
+    assert not passed and "no published window" in summary
+    ctx2 = FakeContext("test", ["1.21", "1.21.1"], root)
+    ctx2.claims, ctx2.require_claim = ["1.21-1.21.1"], True
+    passed, _ = check_claimed_versions.run(ctx2)
+    assert passed
+
+
+def test_github_actions_requires_a_claim(tmp_path, stubbed, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    root = _project(tmp_path, {})
+    passed, _ = _run(root, ["1.21", "1.21.1"], check=check_claimed_versions)
+    assert not passed
+    assert "GITHUB_ACTIONS is set" in capsys.readouterr().out

@@ -35,6 +35,8 @@ class ValidatorContext:
     overlay: bool = False
     # Version windows named with --claim (the release pipeline's publish window).
     claims: list[str] = field(default_factory=list)
+    # --require-claim: a run without any claim beyond validator.json fails.
+    require_claim: bool = False
 
 
 class FileRange:

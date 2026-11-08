@@ -223,6 +223,9 @@ def main() -> None:
     parser.add_argument("--claim", action="append", default=[], metavar="START-END",
                         help="a version window the mod is published for (may be repeated); "
                              "checked by check_claimed_versions and check_data_formats")
+    parser.add_argument("--require-claim", action="store_true",
+                        help="fail check_claimed_versions when nothing beyond validator.json states a "
+                             "published window (always on when GITHUB_ACTIONS is set)")
     parser.add_argument("--json", dest="json_out", nargs="?", const="-", default=None, metavar="PATH",
                         help="emit machine-readable JSON report (path or - for stdout)")
     args = parser.parse_args()
@@ -242,6 +245,7 @@ def main() -> None:
         refresh=args.refresh,
         overlay=cfg.get("overlay", False),
         claims=list(args.claim),
+        require_claim=args.require_claim,
     )
     ctx.extra_ids = resolve_extra_ids(ctx.extra_ids_raw, ctx.project_root)
 
