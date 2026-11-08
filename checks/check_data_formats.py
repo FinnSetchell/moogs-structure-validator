@@ -307,8 +307,11 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                 found.setdefault((shown, res.kind, _identity(f)), [[], f])[0].extend(group)
 
     # The two loot forms must say the same thing, wherever the claim spans a
-    # version that reads the old form and one that reads the new: what each side
-    # loads for an id is compared, one file or two (a base file and an overlay).
+    # version that reads the old form and one that reads the new: what 26.3 loads
+    # for an id is compared with what the newest claimed version before it loads,
+    # one file or two (a base file and an overlay). Older versions may read another
+    # copy (an overlay for 1.21.9 on swapping chain for iron_chain, say); those
+    # copies have nothing to agree with 26.3 on.
     old_side = [v for v in checkable if parse_version(v) < LOOT_RENAME]
     new_side = [v for v in checkable if parse_version(v) >= LOOT_RENAME]
     if old_side and new_side:
@@ -319,12 +322,15 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             if r is not None and r.tag_registry == "worldgen/structure":
                 tags.add(r.id)
         conv = Converter(tags)
+        last_old = max(old_side, key=parse_version)
         for (kind, _rid), by_path in sorted(forms_loaded.items()):
             olds = {p: {v for v in vs if parse_version(v) < LOOT_RENAME} for p, vs in by_path.items()}
             news = {p: {v for v in vs if parse_version(v) >= LOOT_RENAME} for p, vs in by_path.items()}
             for po, vo in sorted(olds.items()):
+                if last_old not in vo:
+                    continue
                 for pn, vn in sorted(news.items()):
-                    if not vo or not vn:
+                    if not vn:
                         continue
                     old = project.try_json(po)
                     new = old if po == pn else project.try_json(pn)

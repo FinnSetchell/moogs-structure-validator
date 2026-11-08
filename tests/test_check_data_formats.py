@@ -30,7 +30,7 @@ REGISTRIES = {
                            "filtered", "modify_contents", "exploration_map"],
     "loot_condition_type": ["random_chance", "survives_explosion", "all_of", "any_of", "inverted",
                             "entity_properties"],
-    "item": ["diamond", "book", "iron_ingot", "stone"],
+    "item": ["diamond", "book", "iron_ingot", "stone", "chain", "iron_chain"],
     "block": ["stone", "water", "iron_chain"],
     "worldgen/biome": ["plains", "desert"],
     "tag/worldgen/biome": ["is_overworld"],
@@ -890,3 +890,20 @@ def test_a_list_against_a_26_3_overlay_sequence_is_compared(tmp_path, stubbed, c
     out = capsys.readouterr().out
     assert not passed, out
     assert "functions[1]" in out and "26.3 loses it" in out
+
+
+
+# Round four of the review: correct overlay layouts that must pass.
+
+def test_f01_an_older_copy_has_nothing_to_agree_with_26_3_on(tmp_path, stubbed, capsys):
+    # The base is read by 1.21 to 1.21.4; an overlay for 1.21.5 to 26.3 swaps chain for
+    # iron_chain in both forms. 26.3 is compared with what 26.2 reads (the overlay), not the base.
+    pack = {"pack": {"pack_format": 48, "supported_formats": [48, 121], "min_format": 48, "max_format": 121},
+            "overlays": {"entries": [{"formats": [71, 121], "min_format": 71, "max_format": 121,
+                                      "directory": "ov_new"}]}}
+    chain = dict(OLD_ENTRY, name="minecraft:chain")
+    iron = dict(DUAL_ENTRY, name="minecraft:iron_chain")
+    root = _project(tmp_path, {"data/test/loot_table/t.json": _table(chain),
+                               "ov_new/data/test/loot_table/t.json": _table(iron)}, pack=pack)
+    passed, _ = _run(root, ["1.21", "1.21.4", "1.21.5", "26.2", "26.3"])
+    assert passed, capsys.readouterr().out
