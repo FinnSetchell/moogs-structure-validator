@@ -630,3 +630,50 @@ def test_advanced_random_spread_valid_passes(tmp_path):
     _write(tmp_path, "test", "structure_set", "s.json", data)
     passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
     assert passed
+
+
+# --- MSL types by MSL release ------------------------------------------------------------
+
+def _msl_mod(root: Path, fabric: str) -> None:
+    res = root / "src" / "main" / "resources"
+    res.mkdir(parents=True, exist_ok=True)
+    (res / "fabric.mod.json").write_text(json.dumps({"id": "test", "depends": {"moogs_structures": fabric}}),
+                                         encoding="utf-8")
+
+
+TRIAL_PROC = {"processors": [{"processor_type": "moogs_structures:trial_spawner_randomizing_processor",
+                              "normal_config": "test:arena/normal"}]}
+
+
+def test_a_type_newer_than_the_msl_the_mod_allows_fails(tmp_path, monkeypatch, capsys):
+    # trial_spawner_randomizing_processor first shipped in MSL 3.0.0; with "*" a
+    # 1.21.1 player can run MSL 1.0.0, which does not register it.
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "processor_list", "mobs.json", TRIAL_PROC)
+    _msl_mod(tmp_path, "*")
+    passed, summary = mod.run(FakeContext("test", ["1.21", "1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert "first shipped in MSL 3.0.0" in out
+    assert "Raise the moogs_structures minimum to 3.0.0" in out
+
+
+def test_a_minimum_that_covers_the_type_passes(tmp_path, monkeypatch, capsys):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "processor_list", "mobs.json", TRIAL_PROC)
+    _msl_mod(tmp_path, ">=3.0.0")
+    passed, _ = mod.run(FakeContext("test", ["1.21", "1.21.1"], tmp_path))
+    assert passed, capsys.readouterr().out
+
+
+def test_types_in_the_oldest_msl_tag_have_no_floor(tmp_path, monkeypatch, capsys):
+    # The generic jigsaw structure is already in MSL's oldest tag (2.0.0); MSL 1.x
+    # is not in git, so nothing is assumed about it and "*" passes.
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "structure", "s.json", _generic_structure())
+    _write(tmp_path, "test", "template_pool", "start.json", _pool([
+        {"element_type": "minecraft:single_pool_element", "location": "test:start",
+         "projection": "rigid", "processors": "minecraft:empty"}]))
+    _msl_mod(tmp_path, "*")
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    assert passed, capsys.readouterr().out

@@ -6,6 +6,12 @@ dispatched to its MSL schema; an id MSL does not register is an error (typo
 catcher), except that a type MSL registers on *some* targeted version is real
 content and stays silent (``_MSL_TYPE_WINDOWS``).
 
+A type also has to exist in every MSL the mod allows: a ``moogs_structures:`` type
+first shipped in a later MSL than the mod's declared ``moogs_structures`` minimum
+(raised on each Minecraft version to the oldest MSL published there) is an error,
+since with an older MSL the file names an unregistered type and fails to load
+(``_MSL_TYPE_SINCE``).
+
 Two ``y_allowance`` shapes a JSON schema cannot express are checked by hand:
 ``max_y_allowed`` below ``min_y_allowed`` (MSL rejects it at datapack load), and
 a ``max`` with no ``min`` on the generic jigsaw type (MSL unwraps the absent
@@ -20,8 +26,9 @@ from typing import TYPE_CHECKING
 import jsonschema
 
 import schemas.patcher
+from core import msl_upgrade
 from core.context import services
-from core.mcversions import DV_1_21, DV_VERSION_NAMES, BoundarySide, side_of
+from core.mcversions import DV_1_21, DV_VERSION_NAMES, BoundarySide, parse_version, side_of
 
 if TYPE_CHECKING:
     from core.context import ValidatorContext
@@ -69,6 +76,29 @@ _MSL_TYPE_WINDOWS: dict[str, tuple[int | None, int | None]] = {
     "moogs_structures:waterlogging_fix_processor": (None, DV_1_21),      # 1.20 line only
     "moogs_structures:trial_spawner_randomizing_processor": (DV_1_21, None),
     "moogs_structures:vault_randomizing_processor": (DV_1_21, None),
+}
+
+# The first MSL release that registers each type, from MSL's git tags (read with
+# `git grep` on every tag) and its CHANGELOG. 3.0.0 added the processors (first
+# tags 1.21.1-3.0.0-alpha.1 and 1.20.4-3.0.0-alpha.2; trial spawner and vault in
+# commit 02c2aed), 3.1.0 the replace-vanilla processor and placement, 3.1.2 the
+# hanging entity anchor. Types not listed are already in the oldest tag (v2.0.0:
+# the structure types, pool elements, advanced_random_spread, waterlogging_fix);
+# MSL 1.x is not in git, so no floor is recorded for them rather than a guess.
+_MSL_TYPE_SINCE: dict[str, tuple[int, int, int]] = {
+    "moogs_structures:pillar_processor": (3, 0, 0),
+    "moogs_structures:spawner_randomizing_processor": (3, 0, 0),
+    "moogs_structures:trial_spawner_randomizing_processor": (3, 0, 0),
+    "moogs_structures:vault_randomizing_processor": (3, 0, 0),
+    "moogs_structures:equip_armor_stand_processor": (3, 0, 0),
+    "moogs_structures:close_off_fluid_sources_processor": (3, 0, 0),
+    "moogs_structures:remove_floating_blocks_processor": (3, 0, 0),
+    "moogs_structures:random_replace_with_properties_processor": (3, 0, 0),
+    "moogs_structures:super_gravity_processor": (3, 0, 0),
+    "moogs_structures:flood_with_water_processor": (3, 0, 0),
+    "moogs_structures:vanilla_loot_swap_processor": (3, 1, 0),
+    "moogs_structures:conditional_concentric_rings": (3, 1, 0),
+    "moogs_structures:hanging_entity_anchor_processor": (3, 1, 2),
 }
 
 _schema_cache: dict[str, dict] = {}
@@ -189,12 +219,17 @@ def _check_y_allowance(rel, stype: str, data: dict) -> int:
     return 0
 
 
-def _check_msl_types(subdir: str, rel, data: dict, dv_range) -> int:
+def _check_msl_types(subdir: str, rel, data: dict, dv_range, used: dict | None = None) -> int:
     errors = 0
+
+    def note(type_id):
+        if used is not None:
+            used.setdefault(type_id, set()).add(f"{subdir}/{rel.as_posix() if hasattr(rel, 'as_posix') else rel}")
 
     if subdir == "structure":
         stype = data.get("type")
         if isinstance(stype, str) and stype.startswith(_MSL_PREFIX):
+            note(stype)
             schema_file = _MSL_STRUCTURE_SCHEMAS.get(stype)
             if schema_file is None or not _is_registered(stype, dv_range()):
                 print(f"  [{subdir}] {rel} @ type")
@@ -208,6 +243,7 @@ def _check_msl_types(subdir: str, rel, data: dict, dv_range) -> int:
         for where, element in _iter_pool_elements(data):
             etype = element.get("element_type") or element.get("type")
             if isinstance(etype, str) and etype.startswith(_MSL_PREFIX):
+                note(etype)
                 schema_file = _MSL_ELEMENT_SCHEMAS.get(etype)
                 if schema_file is None or not _is_registered(etype, dv_range()):
                     print(f"  [{subdir}] {rel} @ {where}")
@@ -225,6 +261,7 @@ def _check_msl_types(subdir: str, rel, data: dict, dv_range) -> int:
                     continue
                 ptype = proc.get("processor_type")
                 if isinstance(ptype, str) and ptype.startswith(_MSL_PREFIX):
+                    note(ptype)
                     schema = proc_schemas.get(ptype)
                     if schema is None or not _is_registered(ptype, dv_range()):
                         print(f"  [{subdir}] {rel} @ processors > {i}")
@@ -238,6 +275,7 @@ def _check_msl_types(subdir: str, rel, data: dict, dv_range) -> int:
         if isinstance(placement, dict):
             ptype = placement.get("type")
             if isinstance(ptype, str) and ptype.startswith(_MSL_PREFIX):
+                note(ptype)
                 schema_file = _MSL_PLACEMENT_SCHEMAS.get(ptype)
                 if schema_file is None or not _is_registered(ptype, dv_range()):
                     print(f"  [{subdir}] {rel} @ placement > type")
@@ -266,6 +304,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     failed = False
     error_count = 0
     counts: dict[str, int] = {}
+    used_types: dict[str, set[str]] = {}
 
     for subdir, schema_file in _SUBDIRS:
         worldgen_dir = project.namespace_root / "worldgen" / subdir
@@ -291,10 +330,15 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                 continue
 
             n = _print_errors(validator, data, subdir, rel, "(root)")
-            n += _check_msl_types(subdir, rel, data, dv_range)
+            n += _check_msl_types(subdir, rel, data, dv_range, used_types)
             if n:
                 error_count += n
                 failed = True
+
+    n_msl = _check_msl_releases(ctx, svc, used_types)
+    if n_msl:
+        error_count += n_msl
+        failed = True
 
     total = sum(counts.values())
     count_str = "  ".join(f"{k}: {v}" for k, v in counts.items() if v > 0)
@@ -308,6 +352,60 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
     summary = f"{total} files, 0 errors" if error_count == 0 else f"{total} files, {error_count} error(s)"
     return not failed, summary
+
+
+def _window_has(type_id: str, version_dv: int | None) -> bool:
+    """Whether MSL registers ``type_id`` on a version at all (its MC window)."""
+    window = _MSL_TYPE_WINDOWS.get(type_id)
+    if window is None or version_dv is None:
+        return True
+    added, removed = window
+    return (added is None or version_dv >= added) and (removed is None or version_dv < removed)
+
+
+def _check_msl_releases(ctx, svc, used: dict[str, set[str]]) -> int:
+    """Types first shipped in a later MSL than the oldest one the mod allows."""
+    floored = {t: since for t, since in _MSL_TYPE_SINCE.items() if t in used}
+    if not floored:
+        return 0
+    declared, sources = msl_upgrade.declared_minimum(svc.project.root)
+    if not sources:
+        return 0   # not an MSL mod: the unknown-type error above already covers it
+    builds = msl_upgrade.MslBuilds()
+    index = svc.versions
+    order = sorted((v for v in ctx.mc_versions if parse_version(v)), key=parse_version)
+    errors = 0
+    for type_id, since in sorted(floored.items()):
+        short = []
+        for v in order:
+            if not _window_has(type_id, index.get(v) if index else None):
+                continue
+            eff = builds.effective(v, declared)
+            if eff is not None and eff < since:
+                short.append((v, eff))
+        if not short:
+            continue
+        errors += 1
+        lows = sorted({e for _, e in short})
+        files = sorted(used[type_id])
+        more = f" (+{len(files) - 3} more)" if len(files) > 3 else ""
+        print(f"  [msl] {type_id} first shipped in MSL {msl_upgrade.fmt(since)}")
+        print(f"    on {_version_runs([v for v, _ in short], order)} this mod allows MSL "
+              f"{msl_upgrade.fmt(lows[0])} ({'; '.join(sources)}), which does not register it, so "
+              f"{', '.join(files[:3])}{more} fail to load there. Raise the moogs_structures minimum "
+              f"to {msl_upgrade.fmt(since)}.")
+    return errors
+
+
+def _version_runs(versions: list[str], order: list[str]) -> str:
+    idx = {v: i for i, v in enumerate(order)}
+    runs: list[list[str]] = []
+    for v in versions:
+        if runs and idx[v] == idx[runs[-1][-1]] + 1:
+            runs[-1].append(v)
+        else:
+            runs.append([v])
+    return ", ".join(r[0] if len(r) == 1 else f"{r[0]}-{r[-1]}" for r in runs)
 
 
 _patched_pool: list[dict] = []
