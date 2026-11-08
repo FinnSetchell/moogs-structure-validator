@@ -907,3 +907,17 @@ def test_f01_an_older_copy_has_nothing_to_agree_with_26_3_on(tmp_path, stubbed, 
                                "ov_new/data/test/loot_table/t.json": _table(iron)}, pack=pack)
     passed, _ = _run(root, ["1.21", "1.21.4", "1.21.5", "26.2", "26.3"])
     assert passed, capsys.readouterr().out
+
+
+
+def test_f02_ids_without_a_namespace_read_as_minecraft(tmp_path, stubbed, capsys):
+    # The game reads "diamond" as minecraft:diamond, in an overlay or beside the old form.
+    bare = {"type": "item", "name": "diamond", "modifier": {"type": "set_count", "count": 3}}
+    root = _project(tmp_path, {"data/test/loot_table/t.json": _table(OLD_ENTRY),
+                               "ov_26_3/data/test/loot_table/t.json": _table(bare)}, pack=OVERLAY_PACK)
+    passed, _ = _run(root, ["26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+    tag = {"type": "minecraft:tag", "name": "minecraft:logs", "expand": True, "items": "#logs"}
+    root = _project(tmp_path / "tag", {"data/test/loot_table/t.json": _table(tag)})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    assert passed, capsys.readouterr().out

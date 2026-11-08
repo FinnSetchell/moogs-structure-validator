@@ -25,12 +25,14 @@ the way 26.3 does:
 * a single ``modifier`` object and a one-item list are the same, as are one
   condition and an ``all_of`` of just that condition, and a condition list and
   an ``all_of`` of its items;
-* a type id with no namespace is ``minecraft:``; ``1.0`` is ``1``;
+* an id with no namespace is ``minecraft:``, as the game reads it (any string in
+  id form: item and entry names, tags, references, type ids); ``1.0`` is ``1``;
 * key order does not matter.
 """
 from __future__ import annotations
 
 import json
+import re
 from typing import Iterable
 
 LOOT_RENAME = (26, 3)   # the first version that reads `modifier` / `condition` instead
@@ -79,6 +81,18 @@ def _ns(type_id):
 
 def _tagged(v: str) -> str:
     return v if v.startswith("#") else "#" + v
+
+
+_BARE_ID = re.compile(r"^#?[a-z0-9_.\-/]+$")
+
+
+def _ns_id(v):
+    """A string in id form with no namespace, as the game reads it: ``minecraft:``.
+    Both sides are normalised alike, so a string that only looks like an id (a word
+    such as ``this``) gets the same prefix on each and still compares equal."""
+    if isinstance(v, str) and _BARE_ID.match(v):
+        return "#minecraft:" + v[1:] if v.startswith("#") else "minecraft:" + v
+    return v
 
 
 class Converter:
@@ -360,7 +374,7 @@ def _norm_condition(c):
         if out.get("type") == "minecraft:all_of" and isinstance(out.get("terms"), list) and len(out["terms"]) == 1:
             return out["terms"][0]
         return out
-    return c
+    return _ns_id(c)
 
 
 def _norm_modifier(m):
@@ -390,7 +404,7 @@ def _norm(v, key):
         return [_norm(x, key) for x in v]
     if isinstance(v, float) and v.is_integer():
         return int(v)
-    return v
+    return _ns_id(v)
 
 
 def _kind_of(v):
@@ -645,7 +659,7 @@ def _entry(e, path: str, conv: Converter, out) -> None:
         _table(e["value"], f"{path}.value", conv, out)
     if _short(e.get("type")) == "tag" and isinstance(e.get("name"), str) and "items" in e:
         want, have = _tagged(e["name"]), e["items"]
-        if not (isinstance(have, str) and _tagged(have) == want):
+        if not (isinstance(have, str) and _ns_id(_tagged(have)) == _ns_id(want)):
             out.append((f"{path}.items", DISAGREE, f"26.3 reads `items` = {_short_json(have)}; the old form's "
                                                    f"`name` gives {_short_json(want)}"))
 
