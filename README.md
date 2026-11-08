@@ -28,6 +28,7 @@ Exits `0` on success, `1` if any check fails.
 | `--check NAME` | Run only the named check (can repeat) |
 | `--skip-check NAME` | Skip the named check (can repeat) |
 | `--json` | Emit machine-readable JSON to stdout; human output goes to stderr |
+| `--claim START-END` | A version window the mod is published for, such as `1.21-26.3` (can repeat). For the release pipeline, which knows the exact window it is about to publish. See "Claimed versions" below |
 
 Examples:
 
@@ -86,6 +87,16 @@ Every other check, and everything the pack does ship, is checked exactly as for 
 { "namespace": "mes", "mc_versions": ["1.21.2", "26.2"], "extra_ids": ["biomesoplenty:*"], "overlay": true }
 ```
 
+### Claimed versions
+
+`mc_versions` is what the validator checks. What players are promised is stated elsewhere, and the validator reads it too:
+
+- `.github/moogs-publish.yml`: the `mc: { start, end }` window of this branch's `targets` entry (the branch comes from `GITHUB_HEAD_REF` / `GITHUB_REF_NAME` in CI, else the checkout's HEAD; failing that, the target whose window holds the oldest `mc_versions` entry). The manifest lives on the default branch, so other branches' checkouts may not have it.
+- `pack.mcmeta`: a declared range (`supported_formats`, or `min_format` / `max_format`), mapped to releases through each release's data pack format. A bare `pack_format` is the format the pack was written for, not a range, and is not read as a claim.
+- `--claim START-END` on the command line.
+
+`check_claimed_versions` fails when any of these names a release `mc_versions` leaves out, since no check has looked at that release. `check_data_formats` checks every claimed release, listed or not. When a claim names a release the cached version index does not know, the index is fetched again, and a release it still does not know fails rather than quietly dropping out of the range.
+
 ---
 
 ## Checks
@@ -94,12 +105,14 @@ Checks run in order. The first column is the name to use with `--check` / `--ski
 
 | Check | What it validates | Exit behavior |
 |---|---|---|
+| `check_claimed_versions` | Every release the mod is published for (publish manifest window, `pack.mcmeta` range, `--claim`) is listed in `mc_versions`, so every other check covers it. *(new in v1.13.0)* | Fails |
 | `check_directory_names` | Data pack uses the right folder names for the target versions: singular (`structure`, `loot_table`) for 1.21+, plural for 1.20.x. Skips when `mc_versions` spans the 1.21 boundary. | Fails |
 | `nbt_check` | Every `.nbt` file under the structures directory parses as valid gzipped NBT. | Fails on unreadable files |
 | `check_data_integrity` | Pool-to-NBT-to-worldgen-to-structure-set reference chain: all NBT files referenced by template pools exist; all worldgen structures reference real files; structure sets reference real structures. Also the reverse — every `worldgen/structure/*.json` must be placed by something, either an entry in a `structure_set` (any namespace, so a pack overriding a vanilla set counts) or an MSL `replace_vanilla` `replacement_structure`. A structure nothing places can never generate and fails silently. Handles `moogs_structures:versioned_single_pool_element` pool elements. | Fails |
 | `check_version_coverage` | For every `moogs_structures:versioned_single_pool_element` in a template pool, the `locations` map must cover the full `mc_versions` range and each range string must parse. Malformed or inverted ranges (`1.21.5-1.21`) fail; a version in `mc_versions` that no range covers fails. *(new in v1.7.0)* | Fails |
 | `check_loot_tables` | Every `LootTable` field in block-entity NBT resolves to an actual `loot_table/*.json` in the data pack. | Fails |
 | `check_loot_table_schemas` | Each `loot_table/*.json` is valid against the bundled Minecraft JSON schema. | Fails |
+| `check_data_formats` | Every JSON file under `data/` (loot tables, item modifiers, predicates, advancements, trial spawner configs, template pools, processor lists, structures, structure sets, tags and every other vanilla data kind) is read the way **each claimed release** reads it: which files that release loads (singular or plural folder names, `pack.mcmeta` overlays) and how it reads each one (the [vanilla-mcdoc](https://github.com/SpyglassMC/vanilla-mcdoc) model in `data/format_model`, proven against every release's own vanilla data). Errors: a key that release ignores when the object lacks the form it reads instead (`functions` on 26.3, which reads `modifier`; an object written in both forms passes), a key no release reads, a missing required field, a value of the wrong kind, a `minecraft:` id or tag the release does not have, a file in a folder spelling it does not load, and a claimed release the model has not been proven against. Warnings: a key the release ignores with nothing to replace it, a data kind the release does not have, and files that load on 26.3 only because Moog's Structure Lib rewrites them (MSL's 26.3 builds upgrade pre-26.3 block states, conditions, function ids and number ranges on load, but not `functions` lists; the port is `core/msl_upgrade.py`). Unnamespaced ids are read as `minecraft:`, as the game does. *(new in v1.13.0)* | Fails on ERROR; WARN prints only |
 | `check_registries` | Block and item IDs in loot tables and NBT palettes exist in the MC registries for the targeted versions. The two halves are independent — a pack with no `loot_table` directory still has its palettes scanned. Validates palette entries against the per-file minimum version (derived from versioned pool elements); the game re-maps renamed blocks upward through DataFixerUpper on load, so the floor is the only version that can fail. An unknown `minecraft:` block is annotated with the first release after that floor that has it (every stable release in `misode/mcmeta` is probed, so the note stays right as new versions ship), or `unknown ID`. Files in the multi-variant `palettes` form are scanned too, every variant. | Fails |
 | `check_worldgen_schemas` | Template pool, structure, structure set, and processor list JSON files validate against bundled MC + MSL schemas. Unknown `moogs_structures:*` type ids are rejected (typo catcher). MSL types with per-MC-version registration windows (e.g. `waterlogging_fix_processor` on 1.20 only, `trial_spawner_randomizing_processor` on 1.21+) are only flagged when they're dead on **every** targeted MC version. The `advanced_random_spread` schema covers the optional `when_replacing` block (MSL 3.3.0+): `modid`, `vanilla_key`, `spacing` and `separation` are all required, and any other key inside it is an error. Also catches two `y_allowance` shapes JSON schema cannot express: `max_y_allowed` below `min_y_allowed` (MSL rejects it at datapack load), and `max_y_allowed` set with no `min_y_allowed` on the generic jigsaw type (MSL unwraps the absent `min` and crashes chunk generation). *(MSL version-gated in v1.8.3; MSL 3.1.0 types added in v1.9.0; y_allowance crash in v1.10.2)* | Fails |
 | `check_entity_nbt` | Entity IDs in structure NBT exist in the entity registry. Enforces the 1.20.5 item-format boundary: files targeting pre-1.20.5 must use the old item shape (`Count`), files targeting 1.20.5+ must use the new shape (`count`). | Fails |
@@ -136,7 +149,7 @@ once (`core/nbt.py`, a parser built for structure files: plain blocks stay in
 two flat int arrays, only block entities, entities and the palette become
 dicts), indexes it once (block entities, every entity including riders and
 spawner-nested ones, blocks by palette index), reads every JSON file once, and
-fetches every mcmeta registry once. The 29 checks then apply their rules to
+fetches every mcmeta registry once. The 32 checks then apply their rules to
 those indexes. On Moog's Voyager Structures (355 files, 1.27 million blocks)
 the check phase takes about 2 seconds.
 
@@ -145,6 +158,17 @@ vanilla structure and template-pool lists all come from
 [`misode/mcmeta`](https://github.com/misode/mcmeta), pinned per Minecraft
 version and cached under `cache/`; a new release needs only its name in
 `mc_versions`.
+
+The one exception is the data format model `check_data_formats` reads with:
+a pinned copy of vanilla-mcdoc in `data/format_model/`, accepted only after
+`tools/update_format_model.py` has read every release's own vanilla data with
+it and found nothing unexplained (`data/format_model/VERIFICATION.md` is that
+record). A release the model has not been proven against fails the check, so a
+new Minecraft version needs the model updated before a mod can claim it:
+
+```bash
+py -3.13 tools/update_format_model.py
+```
 
 ---
 

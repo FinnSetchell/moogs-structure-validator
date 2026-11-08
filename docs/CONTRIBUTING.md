@@ -114,6 +114,52 @@ version index.
 1. Create `checks/my_check.py` with a `run(ctx)` function.
 2. Add its name to `CHECK_NAMES` in `validator.py` at the position where it should run. The name is what users pass to `--check` / `--skip-check`.
 
+## The data format model
+
+`check_data_formats` reads JSON the way each Minecraft release does, with the
+vanilla-mcdoc symbol table pinned in `data/format_model/`:
+
+- `core/mcdoc.py` -- `Reader(symbols, version, ...)` walks one value against one
+  type as that release reads it and returns `Finding`s (`foreign-key`,
+  `unknown-key`, `missing`, `unknown-id`, `unknown-tag`, `shape`). A key another
+  release reads is reported with the keys this release reads instead and whether
+  the object carries one, so an object written in both forms passes.
+- `core/formats.py` -- which files a release loads (folder spelling, `pack.mcmeta`
+  overlays), tag files, the model loader with its `patches`, and
+  `version_reader(model, version, registry_summary, ...)`.
+- `core/claims.py` -- the releases a mod is published for (`validator.json`, the
+  publish manifest, `pack.mcmeta`, `--claim`).
+- `core/msl_upgrade.py` -- a port of Moog's Structure Lib's on-load rewrite of
+  pre-26.3 data (`compat/LegacyDataUpgrader`). Keep it in step with MSL.
+
+**Updating the model** (a new Minecraft release, or a newer vanilla-mcdoc):
+
+```bash
+py -3.13 tools/update_format_model.py            # fetch, prove, write
+py -3.13 tools/update_format_model.py --dry-run  # report only
+```
+
+It reads every stable release's own vanilla data (misode/mcmeta
+`<version>-data-json`, cached in `cache/vanilla/`) with the model as that
+release, lists every finding, and only releases that come out clean go into
+`model.json`'s `verified`. It also writes `VERIFICATION.md`, including two
+advisory lists: fields vanilla stopped writing that the model still reads (a
+rename the model missed), and fields vanilla started writing that the model
+says the release before already read (a field the model dates too early).
+
+When it reports something, decide which it is:
+
+- **The model is wrong about a version window**: add a `patches` entry
+  (`type`, `key`, `since` / `until`, `reason`) and say how you know (vanilla data
+  of both releases, a string first appearing in the client jar, the codec's
+  bytecode).
+- **The model lacks a field vanilla uses**: add a `gaps` entry with
+  `scope: "model"` (the check skips that finding too) and a reason.
+- **Vanilla's own data is wrong**: a `gaps` entry with `scope: "vanilla"` (only the
+  proof skips it; a mod making the same mistake is still reported).
+
+Keep both lists short; every entry needs its evidence in `reason`.
+
 ## Testing your check
 
 ```bash

@@ -1,3 +1,14 @@
+## v1.13.0 (unreleased)
+- [x] `core/mcdoc.py` -- reads JSON against the vanilla-mcdoc symbol table as one release reads it: per-field since/until, union members of other releases recognised, replacements paired by edge / name / referenced registries, dispatchers with parent and key accessors, templates
+- [x] `core/formats.py` -- folder spelling per release, `pack.mcmeta` overlays, tag files, model loader with `patches`, empty mcmeta lists (1.21/1.21.1 `worldgen/structure`) filled from neighbouring releases
+- [x] `core/claims.py` -- publish manifest target (PyYAML optional), `pack.mcmeta` range, `--claim`; stale version index refetched
+- [x] `core/msl_upgrade.py` -- port of MSL `compat/LegacyDataUpgrader` (3.3.0-26.3 to 3.4.1): applied on 26.3+ when the mod depends on `moogs_structures`
+- [x] `checks/check_data_formats.py`, `checks/check_claimed_versions.py`; `--claim` flag
+- [x] `data/format_model/` -- symbols pinned at vanilla-mcdoc 1a674539; proven clean against vanilla data of all 24 releases 1.20-26.3; 2 patches (enchant_randomly `options`, `only_compatible` since 1.21), 3 model gaps, 1 vanilla bug
+- [x] 26.3 behaviour checked in the 26.3 jar's own codecs (javap + a JsonOps harness): pool keys, `Identifier` default namespace, block state `id`/`properties`, typed int providers
+- [x] `tests/test_check_data_formats.py` (22 tests)
+- [x] fleet: 20 checkouts read only; per-mod audit in the session report
+
 ## v1.12.0 (2026-09-24)
 - [x] `checks/check_merchant_offers.py` -- warn-only: structure merchants without saved `Offers` (MSL < 3.3.1 rolls them on the worldgen thread)
 - [x] MSL 3.3.0: replacement `options` block, `when_replacing` schema + spacing/preset checks, no-`when_replacing` warning; checked against MSL `ReplacementOptions`, `AdvancedRandomSpread` and `ReplaceVanillaManager` (26.1.0-26.1.2 branch)

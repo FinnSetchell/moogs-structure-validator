@@ -1,5 +1,22 @@
 # changelog
 
+## v1.13.0 -- unreleased
+
+### Added
+- **`check_data_formats` (new): every data file, read the way each claimed release reads it.** Minecraft reads a data file with its own version's codecs and drops any key they do not know, without a word in the log. 26.3 renamed the loot table keys (`functions` -> `modifier`, `function` -> `type`, `conditions` -> `condition`, `condition` -> `type`), and every Moog 1.21 branch shipped chests that load on 26.3 but lose their stack counts and enchantments. `check_loot_table_schemas` passed them, because it reads one loosened schema with no idea of versions.
+
+  The new check works out, for every claimed release, which files that release loads (singular or plural folder names, `pack.mcmeta` overlays) and reads each one with that release's format, from the [vanilla-mcdoc](https://github.com/SpyglassMC/vanilla-mcdoc) model pinned in `data/format_model/`. It covers every vanilla data kind a pack can ship: loot tables, item modifiers, predicates, advancements, trial spawner configs, template pools, processor lists, structures, structure sets, tags and the rest. A key the release ignores is an error when the object does not also carry the form that release reads, so a file written in both forms (old keys for 1.21 to 26.2, new keys for 26.3) passes. Also errors: keys no release reads, missing required fields, values of the wrong kind, `minecraft:` ids and tags the release does not have, and files in a folder spelling it does not load.
+
+  On 26.3 the check reads a Moog mod's files the way the game does with Moog's Structure Lib installed: MSL's 26.3 builds rewrite pre-26.3 block states, conditions, function ids and number ranges on load (`core/msl_upgrade.py` ports that). Files that only load because of that rewrite are warnings; what the rewrite misses, such as `functions` lists, stays an error.
+
+  On the fleet's 1.21 branches it fails MVS, MES, MMR, MMV, MNS, MOS, MSS and MTR on 26.3 (the reported bug), plus MOS's shipwreck treasure maps (they name a structure tag that does not exist, on every release up to 26.2) and the mob equipment in MNS and MOS trial spawner configs (old `HandItems` / `ArmorItems`, ignored from 1.21.5). MFR's 1.21 branch, already carrying both loot forms, passes.
+- **The model is proven, not trusted.** `tools/update_format_model.py` reads every stable release's own vanilla data (misode/mcmeta, 1.20 to 26.3: 4,877 to 8,269 files each, tags included) with the model as that release; only releases that come out clean count as verified, and the check fails a claimed release that is not. It also lists fields vanilla stopped or started writing that the model does not account for. That turned up two fields vanilla-mcdoc dates too early (`enchant_randomly`'s `options` and `only_compatible`, both 1.21), now corrected in `model.json` with the evidence. The record is `data/format_model/VERIFICATION.md`.
+- **`check_claimed_versions` (new).** Every check reads `mc_versions`, but a mod's published window is in `.github/moogs-publish.yml` and `pack.mcmeta`. Every 1.21 branch published 1.21-26.3 with `mc_versions` ending at 26.2, so no check ever looked at 26.3. This check fails when a publish manifest window, a declared `pack.mcmeta` range or a `--claim` names a release `mc_versions` leaves out.
+- **`--claim START-END`** names the window a release is published for, for the release pipeline to pass.
+
+### Changed
+- A claim naming a release the cached version index does not know refetches the index, and fails if the release is still unknown, instead of quietly shortening the range.
+
 ## v1.12.0 -- 2026-09-24
 
 ### Added
