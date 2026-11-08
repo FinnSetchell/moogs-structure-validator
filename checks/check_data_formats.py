@@ -204,15 +204,20 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         reader = version_reader(model, v, data, _local_ids(files, resource_kinds, registries),
                                 neighbour_lists(v, order, svc.mcmeta.data))
         loaded_kinds: set[str] = set()
+        classified = {rel: classify(rel, resource_kinds, registries) for rel in files}
+        # the ids this version loads from some file (a pack may ship both folder spellings)
+        loaded_ids = {(r.kind, r.id) for r in classified.values() if r is not None and r.loaded_on(vt)}
         for rel in sorted(files):
             path = files[rel]
-            res = classify(rel, resource_kinds, registries)
+            shown = path.relative_to(resources).as_posix()
+            res = classified[rel]
             if res is None:
                 parts = rel.split("/")
                 skipped_kinds["/".join(parts[1:2])] += 1
                 continue
-            shown = path.relative_to(resources).as_posix()
             if not res.loaded_on(vt):
+                if (res.kind, res.id) in loaded_ids:
+                    continue  # this version loads the same id from its own folder spelling
                 f = Finding("", "not-loaded", detail=(
                     f"this version does not load `{rel.split('/')[1]}/`; "
                     + ("it reads the singular folder names from 1.21" if res.read_until

@@ -545,3 +545,10 @@ def test_a_rewrite_newer_than_the_mods_msl_does_not_rescue(tmp_path, stubbed, mo
     assert not passed
     assert "`conditions` is ignored" in out
     assert "[ERROR] on 26.3 this mod allows MSL" in out
+
+
+def test_both_folder_spellings_each_loaded_by_their_own_versions_pass(tmp_path, stubbed, capsys):
+    root = _project(tmp_path, {"data/test/loot_tables/chest.json": _table(OLD_ENTRY),
+                               "data/test/loot_table/chest.json": _table(OLD_ENTRY)})
+    passed, _ = _run(root, ["1.20.6", "1.21"])
+    assert passed, capsys.readouterr().out
