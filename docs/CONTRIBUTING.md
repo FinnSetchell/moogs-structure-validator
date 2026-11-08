@@ -130,7 +130,15 @@ vanilla-mcdoc symbol table pinned in `data/format_model/`:
 - `core/claims.py` -- the releases a mod is published for (`validator.json`, the
   publish manifest, `pack.mcmeta`, `--claim`).
 - `core/msl_upgrade.py` -- a port of Moog's Structure Lib's on-load rewrite of
-  pre-26.3 data (`compat/LegacyDataUpgrader`). Keep it in step with MSL.
+  pre-26.3 data (`compat/LegacyDataUpgrader`), and the reader for a mod's declared
+  `moogs_structures` range. Keep it in step with MSL.
+- `data/msl_builds.json` -- the oldest MSL published for each Minecraft version
+  (from Modrinth) and, per MSL behaviour the check models, the Minecraft window and
+  the first MSL release that has it, with the source file. When MSL gains a data
+  behaviour the mods rely on (or a new Minecraft version ships), update it here.
+- `data/allowed_keys.json` -- keys no version reads that are let through because
+  they change nothing in game. Each entry needs its reason; a key the author meant
+  to do something does not belong here.
 
 **Updating the model** (a new Minecraft release, or a newer vanilla-mcdoc):
 
