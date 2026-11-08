@@ -575,3 +575,14 @@ def test_allowlist_matches_the_value(tmp_path, stubbed, capsys):
     passed, _ = _run(root, ["1.21"])
     assert not passed
     assert "`only_compatible` is read by no version" in capsys.readouterr().out
+
+
+def test_unreadable_json_anywhere_under_data_fails(tmp_path, stubbed, capsys):
+    res = tmp_path / "src" / "main" / "resources" / "data"
+    for rel in ("test/predicate/broken.json", "minecraft/tags/worldgen/biome/x.json", "test/moogs_structures/x.json"):
+        (res / rel).parent.mkdir(parents=True, exist_ok=True)
+        (res / rel).write_text('{"values": ["minecraft:plains",],}', encoding="utf-8")
+    passed, _ = _run(tmp_path, ["1.21"])
+    out = capsys.readouterr().out
+    assert not passed
+    assert out.count("not valid JSON") == 3

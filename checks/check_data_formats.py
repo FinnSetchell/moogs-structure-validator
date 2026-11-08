@@ -109,6 +109,8 @@ def _message(f: Finding) -> str:
         return f"{f.detail}; the file is rejected"
     if f.code == "not-loaded":
         return f.detail
+    if f.code == "unreadable":
+        return f"not valid JSON ({f.detail}); the game cannot load it"
     return f.detail
 
 
@@ -211,6 +213,13 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             path = files[rel]
             shown = path.relative_to(resources).as_posix()
             res = classified[rel]
+            if res is None or res.loaded_on(vt):
+                err = []
+                project.json_or_report(path, err.append)
+                if err:
+                    f = Finding("", "unreadable", detail=str(err[0]).splitlines()[0][:160])
+                    found.setdefault((shown, res.kind if res else "data", _identity(f)), [[], f])[0].extend(group)
+                    continue
             if res is None:
                 parts = rel.split("/")
                 skipped_kinds["/".join(parts[1:2])] += 1
