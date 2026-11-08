@@ -11,7 +11,8 @@ a pack overlay that only one side loads. Either way, what the old side reads is
 compared with what 26.3 reads. In one file everything but the loot forms is shared,
 so only those are compared; across two files the whole table is: the old table is
 converted to the 26.3 form and must equal the overlay's, every field, every pool
-and entry. Item modifier and predicate files carry both
+and entry. Pools, and the entries of a pool, are paired by content, since their
+order does not change what a chest rolls; one left without a partner is an error. Item modifier and predicate files carry both
 forms in one object (``function`` and ``type``, ``conditions`` and
 ``condition``), so the whole object is compared. An item modifier file that is a
 list is the ``minecraft:sequence`` it stands for on 1.21 to 26.2; 26.3 reads one
@@ -468,15 +469,18 @@ def _say(w, h, how: str, old_label: str | None, where: str) -> str:
     src = f"the old form's {old_label}" if old_label else "the old form"
     if how == "order":
         names = lambda xs: ", ".join(_describe(x) for x in xs)
-        return (f"26.3 reads the same {len(h)} {_noun(where, h, old_label)} in another order ({names(h)}); "
-                f"{src} runs {names(w)}. They run in order, so the two forms disagree")
-    if how == "shape":
-        lost, extra = _minus(w, h), _minus(h, w)
+        return (f"26.3 reads the same {len(h)} {_noun(where, len(h), old_label)} in another order "
+                f"({names(h)}); {src} runs {names(w)}. They run in order, so the two forms disagree")
+    if how in ("shape", "unpaired"):
+        if how == "shape":
+            (nw, lost), (nh, extra) = (len(w), _minus(w, h)), (len(h), _minus(h, w))
+        else:
+            (nw, lost), (nh, extra) = w, h
         parts = ([f"26.3 lacks {'; '.join(_describe(x) for x in lost)}"] if lost else []) + \
                 ([f"only 26.3 has {'; '.join(_describe(x) for x in extra)}"] if extra else [])
         end = ("26.3 loses it" if lost and not extra else "1.21 to 26.2 lose it" if extra and not lost
                else "the two forms disagree")
-        return (f"26.3 reads {len(h)} {_noun(where, h, old_label)} here, where {src} has {len(w)} "
+        return (f"26.3 reads {nh} {_noun(where, nh, old_label)} here, where {src} has {nw} "
                 f"({', '.join(parts)}): {end}")
     if how == "type":
         return f"26.3 reads a {h} here, where {src} has a {w}: the two forms disagree"
@@ -492,7 +496,7 @@ _NOUNS = {"pools": ("pool", "pools"), "entries": ("entry", "entries"), "children
           "items": ("item", "items")}
 
 
-def _noun(where: str, items, old_label: str | None) -> str:
+def _noun(where: str, count: int, old_label: str | None) -> str:
     last = where.rsplit(".", 1)[-1].split("[", 1)[0]
     if last in ("pools", "entries", "children"):
         kind = last
@@ -502,7 +506,7 @@ def _noun(where: str, items, old_label: str | None) -> str:
         kind = "conditions"
     else:
         kind = "items"
-    return _NOUNS[kind][0 if len(items) == 1 else 1]
+    return _NOUNS[kind][0 if count == 1 else 1]
 
 
 def _describe(v) -> str:
@@ -551,7 +555,9 @@ def _differences(a, b, path: str, found: list) -> None:
     if isinstance(a, list) and isinstance(b, list):
         if a == b:
             return
-        if len(a) != len(b):
+        if _unordered(path):
+            _pair_unordered(a, b, path, found)
+        elif len(a) != len(b):
             found.append((path, a, b, "shape"))
         elif sorted(map(_key, a)) == sorted(map(_key, b)):
             found.append((path, a, b, "order"))
@@ -561,6 +567,51 @@ def _differences(a, b, path: str, found: list) -> None:
         return
     if a != b:
         found.append((path, a, b, "value"))
+
+
+def _unordered(path: str) -> bool:
+    """Pools, and the entries of a pool: their order does not change what a chest
+    rolls. (A set_contents list, and an entry's children, keep their order.)"""
+    head, _, last = path.rpartition(".")
+    if last == "pools":
+        return True
+    return last == "entries" and head.rpartition(".")[2].startswith("pools[")
+
+
+def _ident(v):
+    """What makes a pool or entry the same one, changed: an entry's type and name, a
+    pool's entries."""
+    if isinstance(v, dict):
+        if isinstance(v.get("entries"), list):
+            return ("pool",) + tuple(sorted(str(_ident(e)) for e in v["entries"]))
+        name = v.get("name", v.get("value"))
+        return (v.get("type"), name if isinstance(name, str) else None)
+    return (_key(v),)
+
+
+def _pair_unordered(a: list, b: list, path: str, found: list) -> None:
+    """Pairs by content: the same item, then the same pool or entry changed, then
+    what is left in order when as many are left on each side. The rest is unpaired."""
+    rest_a, rest_b = list(range(len(a))), list(range(len(b)))
+    for i in list(rest_a):
+        j = next((j for j in rest_b if _key(b[j]) == _key(a[i])), None)
+        if j is not None:
+            rest_a.remove(i)
+            rest_b.remove(j)
+    pairs = []
+    for i in list(rest_a):
+        j = next((j for j in rest_b if _ident(b[j]) == _ident(a[i])), None)
+        if j is not None:
+            pairs.append((i, j))
+            rest_a.remove(i)
+            rest_b.remove(j)
+    if len(rest_a) == len(rest_b):
+        pairs += list(zip(rest_a, rest_b))
+        rest_a, rest_b = [], []
+    for i, j in sorted(pairs, key=lambda ij: ij[1]):
+        _differences(a[i], b[j], f"{path}[{j}]", found)   # the 26.3 copy's position
+    if rest_a or rest_b:
+        found.append((path, (len(a), [a[i] for i in rest_a]), (len(b), [b[j] for j in rest_b]), "unpaired"))
 
 
 # --- the comparison ---------------------------------------------------------------------

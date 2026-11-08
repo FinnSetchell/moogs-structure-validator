@@ -921,3 +921,31 @@ def test_f02_ids_without_a_namespace_read_as_minecraft(tmp_path, stubbed, capsys
     root = _project(tmp_path / "tag", {"data/test/loot_table/t.json": _table(tag)})
     passed, _ = _run(root, ["26.2", "26.3"])
     assert passed, capsys.readouterr().out
+
+
+
+GEM_POOL = {"rolls": 1, "entries": [OLD_ENTRY, BOOK]}
+GEM_POOL_NEW = {"rolls": 1, "entries": [NEW_ENTRY, BOOK_NEW]}
+IRON = {"type": "minecraft:item", "name": "minecraft:iron_ingot"}
+
+
+def test_f03_pools_and_entries_in_another_order_pass(tmp_path, stubbed, capsys):
+    # Pool order, and entry order in a pool, do not change what a chest rolls.
+    base = {"type": "minecraft:chest", "pools": [GEM_POOL, {"rolls": 2, "entries": [IRON]}]}
+    overlay = {"type": "minecraft:chest", "pools": [{"rolls": 2, "entries": [IRON]},
+                                                    {"rolls": 1, "entries": [BOOK_NEW, NEW_ENTRY]}]}
+    root = _project(tmp_path, {"data/test/loot_table/t.json": base, "ov_26_3/data/test/loot_table/t.json": overlay},
+                    pack=OVERLAY_PACK)
+    passed, _ = _run(root, ["26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+
+
+def test_f03_a_change_in_a_moved_pool_is_still_found(tmp_path, stubbed, capsys):
+    base = {"type": "minecraft:chest", "pools": [GEM_POOL, {"rolls": 2, "entries": [IRON]}]}
+    overlay = {"type": "minecraft:chest", "pools": [{"rolls": 3, "entries": [IRON]}, GEM_POOL_NEW]}
+    out = _overlay_fails(tmp_path, base, overlay, capsys)
+    assert "pools[0].rolls" in out and "26.3 reads 3 here, but the old form gives 2" in out
+    moved = {"type": "minecraft:chest", "pools": [{"rolls": 2, "entries": [IRON]},
+                                                  {"rolls": 1, "entries": [BOOK_NEW]}]}
+    out = _overlay_fails(tmp_path / "lost", base, moved, capsys)
+    assert "pools[1].entries" in out and "26.3 lacks minecraft:diamond" in out
