@@ -677,3 +677,49 @@ def test_types_in_the_oldest_msl_tag_have_no_floor(tmp_path, monkeypatch, capsys
     _msl_mod(tmp_path, "*")
     passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
     assert passed, capsys.readouterr().out
+
+
+SPREAD_SET = {"structures": [{"structure": "test:fort", "weight": 1}],
+              "placement": {"type": "moogs_structures:advanced_random_spread", "salt": 1, "spacing": 116,
+                            "separation": 76, "when_replacing": {"modid": "test", "vanilla_key": "fortress",
+                                                                 "spacing": 30, "separation": 12}}}
+
+
+def test_a_field_newer_than_the_msl_the_mod_allows_fails(tmp_path, monkeypatch, capsys):
+    # advanced_random_spread is in MSL 2.0.0, but its when_replacing arrived in
+    # 3.3.0: MSL 3.0.0 skips it, so the replacement spacing is never used.
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "structure_set", "fort.json", SPREAD_SET)
+    _msl_mod(tmp_path, ">=3.0.0")
+    passed, _ = mod.run(FakeContext("test", ["1.21", "1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert "moogs_structures:advanced_random_spread `when_replacing` first read by MSL 3.3.0" in out
+    assert "structure_set/fort.json lose what it sets there" in out
+
+
+def test_a_minimum_that_covers_the_field_passes(tmp_path, monkeypatch, capsys):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "structure_set", "fort.json", SPREAD_SET)
+    _msl_mod(tmp_path, ">=3.3.0")
+    passed, _ = mod.run(FakeContext("test", ["1.21", "1.21.1"], tmp_path))
+    assert passed, capsys.readouterr().out
+
+
+def test_a_pool_element_field_is_gated_too(tmp_path, monkeypatch, capsys):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "template_pool", "start.json", _pool([
+        {"element_type": "moogs_structures:mirroring_single_pool_element", "location": "test:start",
+         "projection": "rigid", "processors": "minecraft:empty", "mirror": "FRONT_BACK"}]))
+    _msl_mod(tmp_path, "*")
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    assert passed, capsys.readouterr().out
+    _write(tmp_path, "test", "template_pool", "start.json", _pool([
+        {"element_type": "moogs_structures:mirroring_single_pool_element", "location": "test:start",
+         "projection": "rigid", "processors": "minecraft:empty", "mirror": "FRONT_BACK",
+         "enhanced_terrain_adaptation": {"kernel_size": 0, "kernel_distance": 0, "top": "none",
+                                         "bottom": "none"}}]))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert "mirroring_single_pool_element `enhanced_terrain_adaptation` first read by MSL 3.0.0" in out

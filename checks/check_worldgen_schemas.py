@@ -10,7 +10,9 @@ A type also has to exist in every MSL the mod allows: a ``moogs_structures:`` ty
 first shipped in a later MSL than the mod's declared ``moogs_structures`` minimum
 (raised on each Minecraft version to the oldest MSL published there) is an error,
 since with an older MSL the file names an unregistered type and fails to load
-(``_MSL_TYPE_SINCE``).
+(``_MSL_TYPE_SINCE``). The same goes for a field MSL added to a type later
+(``_MSL_FIELD_SINCE``): an older MSL skips it without a word, so what it sets is
+lost there.
 
 Two ``y_allowance`` shapes a JSON schema cannot express are checked by hand:
 ``max_y_allowed`` below ``min_y_allowed`` (MSL rejects it at datapack load), and
@@ -99,6 +101,21 @@ _MSL_TYPE_SINCE: dict[str, tuple[int, int, int]] = {
     "moogs_structures:vanilla_loot_swap_processor": (3, 1, 0),
     "moogs_structures:conditional_concentric_rings": (3, 1, 0),
     "moogs_structures:hanging_entity_anchor_processor": (3, 1, 2),
+}
+
+# Fields MSL added to a type after the type itself: the first release whose codec
+# reads each, from the same pass over MSL's tags (`fieldOf` / `optionalFieldOf` per
+# class; the first tag on any Minecraft line that reads it, and no line reads it
+# earlier). An older MSL's codec skips the field without a word.
+_MSL_FIELD_SINCE: dict[tuple[str, str], tuple[int, int, int]] = {
+    ("moogs_structures:advanced_random_spread", "spacing_key"): (3, 1, 0),
+    ("moogs_structures:advanced_random_spread", "structure_id"): (3, 1, 0),
+    ("moogs_structures:advanced_random_spread", "when_replacing"): (3, 3, 0),
+    ("moogs_structures:moogs_structures_generic_jigsaw_structure", "enhanced_terrain_adaptation"): (3, 4, 0),
+    ("moogs_structures:moogs_structures_generic_nether_jigsaw_structure", "enhanced_terrain_adaptation"): (3, 0, 0),
+    ("moogs_structures:mirroring_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
+    ("moogs_structures:legacy_ocean_bottom_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
+    ("moogs_structures:versioned_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
 }
 
 _schema_cache: dict[str, dict] = {}
@@ -222,14 +239,19 @@ def _check_y_allowance(rel, stype: str, data: dict) -> int:
 def _check_msl_types(subdir: str, rel, data: dict, dv_range, used: dict | None = None) -> int:
     errors = 0
 
-    def note(type_id):
-        if used is not None:
-            used.setdefault(type_id, set()).add(f"{subdir}/{rel.as_posix() if hasattr(rel, 'as_posix') else rel}")
+    def note(type_id, obj):
+        if used is None:
+            return
+        where = f"{subdir}/{rel.as_posix() if hasattr(rel, 'as_posix') else rel}"
+        used.setdefault(type_id, set()).add(where)
+        for (t, field) in _MSL_FIELD_SINCE:
+            if t == type_id and field in obj:
+                used.setdefault((t, field), set()).add(where)
 
     if subdir == "structure":
         stype = data.get("type")
         if isinstance(stype, str) and stype.startswith(_MSL_PREFIX):
-            note(stype)
+            note(stype, data)
             schema_file = _MSL_STRUCTURE_SCHEMAS.get(stype)
             if schema_file is None or not _is_registered(stype, dv_range()):
                 print(f"  [{subdir}] {rel} @ type")
@@ -243,7 +265,7 @@ def _check_msl_types(subdir: str, rel, data: dict, dv_range, used: dict | None =
         for where, element in _iter_pool_elements(data):
             etype = element.get("element_type") or element.get("type")
             if isinstance(etype, str) and etype.startswith(_MSL_PREFIX):
-                note(etype)
+                note(etype, element)
                 schema_file = _MSL_ELEMENT_SCHEMAS.get(etype)
                 if schema_file is None or not _is_registered(etype, dv_range()):
                     print(f"  [{subdir}] {rel} @ {where}")
@@ -261,7 +283,7 @@ def _check_msl_types(subdir: str, rel, data: dict, dv_range, used: dict | None =
                     continue
                 ptype = proc.get("processor_type")
                 if isinstance(ptype, str) and ptype.startswith(_MSL_PREFIX):
-                    note(ptype)
+                    note(ptype, proc)
                     schema = proc_schemas.get(ptype)
                     if schema is None or not _is_registered(ptype, dv_range()):
                         print(f"  [{subdir}] {rel} @ processors > {i}")
@@ -275,7 +297,7 @@ def _check_msl_types(subdir: str, rel, data: dict, dv_range, used: dict | None =
         if isinstance(placement, dict):
             ptype = placement.get("type")
             if isinstance(ptype, str) and ptype.startswith(_MSL_PREFIX):
-                note(ptype)
+                note(ptype, placement)
                 schema_file = _MSL_PLACEMENT_SCHEMAS.get(ptype)
                 if schema_file is None or not _is_registered(ptype, dv_range()):
                     print(f"  [{subdir}] {rel} @ placement > type")
@@ -363,9 +385,10 @@ def _window_has(type_id: str, version_dv: int | None) -> bool:
     return (added is None or version_dv >= added) and (removed is None or version_dv < removed)
 
 
-def _check_msl_releases(ctx, svc, used: dict[str, set[str]]) -> int:
-    """Types first shipped in a later MSL than the oldest one the mod allows."""
-    floored = {t: since for t, since in _MSL_TYPE_SINCE.items() if t in used}
+def _check_msl_releases(ctx, svc, used: dict) -> int:
+    """Types and fields first shipped in a later MSL than the oldest one the mod allows."""
+    floored: dict = {t: since for t, since in _MSL_TYPE_SINCE.items() if t in used}
+    floored.update({k: since for k, since in _MSL_FIELD_SINCE.items() if k in used})
     if not floored:
         return 0
     declared, sources = msl_upgrade.declared_minimum(svc.project.root)
@@ -375,7 +398,8 @@ def _check_msl_releases(ctx, svc, used: dict[str, set[str]]) -> int:
     index = svc.versions
     order = sorted((v for v in ctx.mc_versions if parse_version(v)), key=parse_version)
     errors = 0
-    for type_id, since in sorted(floored.items()):
+    for key, since in sorted(floored.items(), key=lambda kv: str(kv[0])):
+        type_id = key if isinstance(key, str) else key[0]
         short = []
         for v in order:
             if not _window_has(type_id, index.get(v) if index else None):
@@ -387,13 +411,20 @@ def _check_msl_releases(ctx, svc, used: dict[str, set[str]]) -> int:
             continue
         errors += 1
         lows = sorted({e for _, e in short})
-        files = sorted(used[type_id])
+        files = sorted(used[key])
         more = f" (+{len(files) - 3} more)" if len(files) > 3 else ""
-        print(f"  [msl] {type_id} first shipped in MSL {msl_upgrade.fmt(since)}")
-        print(f"    on {_version_runs([v for v, _ in short], order)} this mod allows MSL "
-              f"{msl_upgrade.fmt(lows[0])} ({'; '.join(sources)}), which does not register it, so "
-              f"{', '.join(files[:3])}{more} fail to load there. Raise the moogs_structures minimum "
-              f"to {msl_upgrade.fmt(since)}.")
+        runs = _version_runs([v for v, _ in short], order)
+        allows = f"this mod allows MSL {msl_upgrade.fmt(lows[0])} ({'; '.join(sources)})"
+        if isinstance(key, str):
+            print(f"  [msl] {type_id} first shipped in MSL {msl_upgrade.fmt(since)}")
+            print(f"    on {runs} {allows}, which does not register it, so "
+                  f"{', '.join(files[:3])}{more} fail to load there. Raise the moogs_structures minimum "
+                  f"to {msl_upgrade.fmt(since)}.")
+        else:
+            print(f"  [msl] {type_id} `{key[1]}` first read by MSL {msl_upgrade.fmt(since)}")
+            print(f"    on {runs} {allows}, which skips it without a word, so "
+                  f"{', '.join(files[:3])}{more} lose what it sets there. Raise the moogs_structures "
+                  f"minimum to {msl_upgrade.fmt(since)}.")
     return errors
 
 
