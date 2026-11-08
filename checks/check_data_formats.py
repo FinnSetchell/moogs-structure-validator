@@ -26,8 +26,8 @@ reads each one with that version's format (``core/formats.py``,
 * a loot table, item modifier or predicate whose two forms disagree, where 1.21
   to 26.2 read one form and 26.3 the other: side by side in one file (one object,
   for item modifiers and predicates), or across a base file and a pack overlay
-  that only one side loads (ERROR; an overlay laid out so differently that
-  nothing can be paired warns).
+  that only one side loads, where the whole table must agree: every field, and
+  no pool or entry missing from either copy (ERROR).
 
 A claimed version the format model has not been proven against fails too:
 the check cannot vouch for a version nobody has checked it against.
@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING
 from core.claims import claimed_versions, resolve_claims
 from core.context import services
 from core.formats import Pack, classify, effective_files, load_model, neighbour_lists, read_tag, version_reader
-from core.loot_forms import FORM_KINDS, LOOT_RENAME, UNPAIRED, Converter, disagreements
+from core.loot_forms import FORM_KINDS, LOOT_RENAME, Converter, disagreements
 from core.mcdoc import Finding, version_points
 from core.mcversions import parse_version
 from core import msl_upgrade
@@ -80,7 +80,7 @@ def _span(window) -> str:
 
 def _severity(f: Finding) -> str | None:
     """ERROR, WARN, or None (a dual-form key: fine)."""
-    if f.code in ("msl-upgrade", "no-such-kind", UNPAIRED):
+    if f.code in ("msl-upgrade", "no-such-kind"):
         return "WARN"
     if f.code == "foreign-key":
         if not f.counterparts:

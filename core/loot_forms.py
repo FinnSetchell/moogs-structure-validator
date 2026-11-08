@@ -8,7 +8,10 @@ on 26.3 again, with both keys present.
 
 The two forms can sit side by side in one file, or in two files: a base file and
 a pack overlay that only one side loads. Either way, what the old side reads is
-compared with what 26.3 reads. Item modifier and predicate files carry both
+compared with what 26.3 reads. In one file everything but the loot forms is shared,
+so only those are compared; across two files the whole table is: the old table is
+converted to the 26.3 form and must equal the overlay's, every field, every pool
+and entry. Item modifier and predicate files carry both
 forms in one object (``function`` and ``type``, ``conditions`` and
 ``condition``), so the whole object is compared. An item modifier file that is a
 list is the ``minecraft:sequence`` it stands for on 1.21 to 26.2; 26.3 reads one
@@ -54,7 +57,6 @@ _MAP_TAGS_RENAMED = {
 }
 
 DISAGREE = "forms-disagree"   # the two forms say different things: ERROR
-UNPAIRED = "forms-unpaired"   # an overlay laid out differently, so nothing can be paired: WARN
 
 
 class _Absent:
@@ -440,27 +442,111 @@ def _short_json(v, limit: int = 70) -> str:
     return s if len(s) <= limit else s[:limit - 3] + "..."
 
 
-def _explain(want, have, root: str, old_label: str) -> tuple[str, str]:
-    """``(path, message)`` for normalised ``want`` (built from the old form) and
-    ``have`` (what 26.3 reads)."""
+def _explain(want, have, root: str, old_label: str | None) -> tuple[str, str]:
+    """``(path, message)`` for the first difference between normalised ``want``
+    (built from the old form) and ``have`` (what 26.3 reads)."""
     d = _first_difference(want, have, root)
     where, w, h, how = d if d else (root, want, have, "value")
+    return where, _say(w, h, how, old_label, where)
+
+
+def _say(w, h, how: str, old_label: str | None, where: str) -> str:
+    src = f"the old form's {old_label}" if old_label else "the old form"
     if how == "order":
-        names = lambda xs: ", ".join(str(_kind_of(x) or _short_json(x, 40)) for x in xs)
-        noun = ("items" if not all(_kind_of(x) for x in h) else
-                "conditions" if "condition" in old_label else "functions")
-        return where, (f"26.3 reads the same {len(h)} {noun} in another order ({names(h)}); the old form's "
-                       f"{old_label} runs {names(w)}. They run in order, so the two forms disagree")
+        names = lambda xs: ", ".join(_describe(x) for x in xs)
+        return (f"26.3 reads the same {len(h)} {_noun(where, h, old_label)} in another order ({names(h)}); "
+                f"{src} runs {names(w)}. They run in order, so the two forms disagree")
+    if how == "shape":
+        lost, extra = _minus(w, h), _minus(h, w)
+        parts = ([f"26.3 lacks {'; '.join(_describe(x) for x in lost)}"] if lost else []) + \
+                ([f"only 26.3 has {'; '.join(_describe(x) for x in extra)}"] if extra else [])
+        end = ("26.3 loses it" if lost and not extra else "1.21 to 26.2 lose it" if extra and not lost
+               else "the two forms disagree")
+        return (f"26.3 reads {len(h)} {_noun(where, h, old_label)} here, where {src} has {len(w)} "
+                f"({', '.join(parts)}): {end}")
     if how == "type":
-        return where, (f"26.3 reads a {h} here, where the old form's {old_label} has a {w}: "
-                       f"the two forms disagree")
+        return f"26.3 reads a {h} here, where {src} has a {w}: the two forms disagree"
     if h is ABSENT:
-        return where, f"26.3 reads nothing here; the old form's {old_label} gives {_short_json(w)}: 26.3 loses it"
+        return f"26.3 reads nothing here; {src} gives {_short_json(w)}: 26.3 loses it"
     if w is ABSENT:
-        return where, (f"26.3 reads {_short_json(h)} here, which the old form's {old_label} does not have: "
-                       f"1.21 to 26.2 lose it")
-    return where, (f"26.3 reads {_short_json(h)} here, but the old form's {old_label} gives {_short_json(w)}: "
-                   f"the two forms disagree")
+        return f"26.3 reads {_short_json(h)} here, which {src} does not have: 1.21 to 26.2 lose it"
+    return f"26.3 reads {_short_json(h)} here, but {src} gives {_short_json(w)}: the two forms disagree"
+
+
+_NOUNS = {"pools": ("pool", "pools"), "entries": ("entry", "entries"), "children": ("child", "children"),
+          "functions": ("function", "functions"), "conditions": ("condition", "conditions"),
+          "items": ("item", "items")}
+
+
+def _noun(where: str, items, old_label: str | None) -> str:
+    last = where.rsplit(".", 1)[-1].split("[", 1)[0]
+    if last in ("pools", "entries", "children"):
+        kind = last
+    elif last in ("modifier", "functions") or (old_label and "function" in old_label):
+        kind = "functions"
+    elif last in ("condition", "terms") or (old_label and "condition" in old_label):
+        kind = "conditions"
+    else:
+        kind = "items"
+    return _NOUNS[kind][0 if len(items) == 1 else 1]
+
+
+def _describe(v) -> str:
+    """A short name for a pool, entry, function or condition."""
+    if isinstance(v, dict):
+        if isinstance(v.get("entries"), list):
+            names = [_describe(e) for e in v["entries"][:3]]
+            return "a pool of " + ", ".join(names) + (" ..." if len(v["entries"]) > 3 else "")
+        if isinstance(v.get("name"), str):
+            return v["name"]
+        if isinstance(v.get("type"), str):
+            return v["type"]
+    if isinstance(v, str):
+        return v
+    return _short_json(v, 40)
+
+
+def _minus(a: list, b: list) -> list:
+    """The items of ``a`` that ``b`` lacks, counting repeats."""
+    left = [_key(x) for x in b]
+    out = []
+    for x in a:
+        k = _key(x)
+        if k in left:
+            left.remove(k)
+        else:
+            out.append(x)
+    return out
+
+
+def _differences(a, b, path: str, found: list) -> None:
+    """Every difference, not only the first: ``(path, want, have, how)``. Lists of
+    another length are one ``shape`` difference (nothing below them pairs up)."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        ta, tb = a.get("type"), b.get("type")
+        if isinstance(ta, str) and isinstance(tb, str) and ta != tb:
+            found.append((path, ta, tb, "type"))
+            return
+        for k in sorted(set(a) | set(b)):
+            sub = f"{path}.{k}" if path else k
+            if k not in a or k not in b:
+                found.append((sub, a.get(k, ABSENT), b.get(k, ABSENT), "value"))
+            else:
+                _differences(a[k], b[k], sub, found)
+        return
+    if isinstance(a, list) and isinstance(b, list):
+        if a == b:
+            return
+        if len(a) != len(b):
+            found.append((path, a, b, "shape"))
+        elif sorted(map(_key, a)) == sorted(map(_key, b)):
+            found.append((path, a, b, "order"))
+        else:
+            for i, (x, y) in enumerate(zip(a, b)):
+                _differences(x, y, f"{path}[{i}]", found)
+        return
+    if a != b:
+        found.append((path, a, b, "value"))
 
 
 # --- the comparison ---------------------------------------------------------------------
@@ -472,25 +558,38 @@ def disagreements(kind: str, old, new, conv: Converter) -> list[tuple[str, str, 
     out: list[tuple[str, str, str]] = []
     if kind == "loot_table":
         if isinstance(old, dict) and isinstance(new, dict):
-            _table(old, new, "", conv, out)
+            if old is new:
+                _table(old, "", conv, out)
+            else:
+                _whole_table(old, new, conv, out)
     elif kind == "item_modifier":
         if isinstance(old, list) and isinstance(new, dict):
             # 1.21 to 26.2 read a list file as a sequence (the converter writes it as one)
             old = {"function": "minecraft:sequence", "functions": old}
-        _each(old, new, conv, out, _function_pair, "function")
+        _each(old, new, conv, out, _function_pair)
     elif kind == "predicate":
         if isinstance(old, dict) and isinstance(new, dict):
             _condition_pair(old, new, "", conv, out)
     return out
 
 
-def _each(old, new, conv, out, pair, what):
+def _whole_table(old: dict, new: dict, conv: Converter, out) -> None:
+    """A base file and an overlay: the old table, converted to the 26.3 form the way
+    the converter writes it, must be the table 26.3 reads, every field of it."""
+    want = _norm(conv.table_new_only(_table_view(old, old_entry, ("modifier", "condition"))), None)
+    have = _norm(_table_view(new, new_entry, ("functions", "conditions")), None)
+    found: list = []
+    _differences(want, have, "", found)
+    for where, w, h, how in found:
+        out.append((where, DISAGREE, _say(w, h, how, None, where)))
+
+
+def _each(old, new, conv, out, pair):
     if isinstance(old, dict) and isinstance(new, dict):
         pair(old, new, "", conv, out)
     elif isinstance(old, list) and isinstance(new, list):
         if len(old) != len(new):
-            out.append(("", UNPAIRED, f"the old form lists {len(old)} {what}s and the 26.3 copy {len(new)}, so "
-                                      f"they cannot be paired; compare them by hand"))
+            out.append(("", DISAGREE, _say(old, new, "shape", None, "functions")))
             return
         for i, (o, n) in enumerate(zip(old, new)):
             pair(o, n, f"[{i}]", conv, out)
@@ -518,65 +617,44 @@ def _join(path, k):
     return f"{path}.{k}" if path else k
 
 
-def _paired(olds, news, path, what, out):
-    """Pairs by position, or nothing (and a warning) when the two copies differ in length."""
-    olds = olds if isinstance(olds, list) else []
-    news = news if isinstance(news, list) else []
-    if olds is news:
-        return list(enumerate(zip(olds, news)))
-    if len(olds) != len(news):
-        out.append((path, UNPAIRED, f"the old form has {len(olds)} {what} here and the 26.3 copy {len(news)}, so "
-                                    f"their functions and conditions cannot be paired; compare them by hand"))
-        return []
-    return list(enumerate(zip(olds, news)))
+def _list(v) -> list:
+    return v if isinstance(v, list) else []
 
 
-def _table(o: dict, n: dict, path: str, conv: Converter, out) -> None:
-    _site(o, n, path, conv, out)
-    for i, (op, np_) in _paired(o.get("pools"), n.get("pools"), _join(path, "pools"), "pools", out):
-        if not (isinstance(op, dict) and isinstance(np_, dict)):
+# One file: everything but the loot forms is shared, so only the places that carry
+# both forms are compared.
+
+def _table(t: dict, path: str, conv: Converter, out) -> None:
+    _site(t, path, conv, out)
+    for i, p in enumerate(_list(t.get("pools"))):
+        if not isinstance(p, dict):
             continue
         pp = f"{_join(path, 'pools')}[{i}]"
-        _site(op, np_, pp, conv, out)
-        for j, (oe, ne) in _paired(op.get("entries"), np_.get("entries"), f"{pp}.entries", "entries", out):
-            _entry(oe, ne, f"{pp}.entries[{j}]", conv, out)
+        _site(p, pp, conv, out)
+        for j, e in enumerate(_list(p.get("entries"))):
+            _entry(e, f"{pp}.entries[{j}]", conv, out)
 
 
-def _entry(o, n, path: str, conv: Converter, out) -> None:
-    if not (isinstance(o, dict) and isinstance(n, dict)):
+def _entry(e, path: str, conv: Converter, out) -> None:
+    if not isinstance(e, dict):
         return
-    _site(o, n, path, conv, out)
-    for k, (oc, nc) in _paired(o.get("children"), n.get("children"), f"{path}.children", "children", out):
-        _entry(oc, nc, f"{path}.children[{k}]", conv, out)
-    if (_short(o.get("type")) == "loot_table" and isinstance(o.get("value"), dict)
-            and _short(n.get("type")) == "loot_table" and isinstance(n.get("value"), dict)):
-        _table(o["value"], n["value"], f"{path}.value", conv, out)
-    if _short(o.get("type")) == "tag" and isinstance(o.get("name"), str) and "items" in n:
-        want, have = _tagged(o["name"]), n["items"]
+    _site(e, path, conv, out)
+    for k, c in enumerate(_list(e.get("children"))):
+        _entry(c, f"{path}.children[{k}]", conv, out)
+    if _short(e.get("type")) == "loot_table" and isinstance(e.get("value"), dict):
+        _table(e["value"], f"{path}.value", conv, out)
+    if _short(e.get("type")) == "tag" and isinstance(e.get("name"), str) and "items" in e:
+        want, have = _tagged(e["name"]), e["items"]
         if not (isinstance(have, str) and _tagged(have) == want):
             out.append((f"{path}.items", DISAGREE, f"26.3 reads `items` = {_short_json(have)}; the old form's "
                                                    f"`name` gives {_short_json(want)}"))
 
 
-def _site(o: dict, n: dict, path: str, conv: Converter, out) -> None:
-    for old_key, new_key, build in (("functions", "modifier", conv.function_list),
-                                    ("conditions", "condition", conv.condition_list)):
-        if not isinstance(o.get(old_key), list):
-            if new_key in n and old_key not in o and new_key not in o and n[new_key] not in (None, [], {}):
-                # only the 26.3 copy has it (another file): the old side never reads it
-                out.append((_join(path, new_key), DISAGREE,
-                            f"26.3 reads `{new_key}` = {_short_json(n[new_key])}, but the old form has no "
-                            f"`{old_key}` here: 1.21 to 26.2 lose it"))
-            continue
-        expected = build(o[old_key])
-        if new_key not in n:
-            if old_key in n or expected is None:
-                continue   # the 26.3 copy is in the old form: the version check reports it
-            out.append((_join(path, new_key), DISAGREE,
-                        f"26.3 reads no `{new_key}` here; the old form's `{old_key}` gives "
-                        f"{_short_json(expected)}: 26.3 loses it"))
-            continue
-        _compare(new_key, old_key, expected, n[new_key], path, out)
+def _site(obj: dict, path: str, conv: Converter, out) -> None:
+    if isinstance(obj.get("functions"), list) and "modifier" in obj:
+        _compare("modifier", "functions", conv.function_list(obj["functions"]), obj["modifier"], path, out)
+    if isinstance(obj.get("conditions"), list) and "condition" in obj:
+        _compare("condition", "conditions", conv.condition_list(obj["conditions"]), obj["condition"], path, out)
 
 
 def _compare(new_key: str, old_key: str, expected, actual, path, out) -> None:

@@ -651,7 +651,8 @@ def test_forms_split_across_an_overlay_are_compared(tmp_path, stubbed, capsys):
     assert not passed, out
     assert "ov_26_3/data/test/loot_table/t.json" in out
     assert "the old form is read from data/test/loot_table/t.json" in out
-    assert "pools[0].entries[0].modifier[1]" in out and "26.3 loses it" in out
+    assert "pools[0].entries[0].modifier" in out and "26.3 lacks minecraft:enchant_randomly" in out
+    assert "26.3 loses it" in out
 
 
 def test_an_overlay_copy_with_no_modifier_at_all_fails(tmp_path, stubbed, capsys):
@@ -662,18 +663,63 @@ def test_an_overlay_copy_with_no_modifier_at_all_fails(tmp_path, stubbed, capsys
     passed, _ = _run(root, ["26.2", "26.3"])
     out = capsys.readouterr().out
     assert not passed, out
-    assert "26.3 reads no `modifier` here" in out
+    assert "pools[0].entries[0].modifier" in out and "26.3 reads nothing here" in out
 
 
-def test_an_overlay_laid_out_differently_warns(tmp_path, stubbed, capsys):
-    # One entry dropped for 26.3: the entries cannot be paired, so nothing is judged.
-    base = {"type": "minecraft:chest", "pools": [{"rolls": 1, "entries": [OLD_ENTRY, OLD_ENTRY]}]}
-    root = _project(tmp_path, {"data/test/loot_table/t.json": base,
-                               "ov_26_3/data/test/loot_table/t.json": _table(NEW_ENTRY)}, pack=OVERLAY_PACK)
+# Across a base file and its overlay the whole table must agree (the review's
+# probes e02 to e05: each passed before, at most with a warning).
+
+BOOK = {"type": "minecraft:item", "name": "minecraft:book", "functions": [ENCH]}
+BOOK_NEW = {"type": "minecraft:item", "name": "minecraft:book", "modifier": {"type": "minecraft:enchant_randomly"}}
+
+
+def _overlay_fails(tmp_path, base, overlay, capsys):
+    root = _project(tmp_path, {"data/test/loot_table/t.json": base, "ov_26_3/data/test/loot_table/t.json": overlay},
+                    pack=OVERLAY_PACK)
     passed, summary = _run(root, ["26.2", "26.3"])
     out = capsys.readouterr().out
-    assert passed and "warning" in summary, out
-    assert "cannot be paired" in out
+    assert not passed and "warning" not in summary, out
+    return out
+
+
+def test_e02_an_overlay_dropping_a_pool_fails(tmp_path, stubbed, capsys):
+    base = {"type": "minecraft:chest", "pools": [{"rolls": 1, "entries": [OLD_ENTRY]},
+                                                 {"rolls": 1, "entries": [BOOK]}]}
+    out = _overlay_fails(tmp_path, base, _table(NEW_ENTRY), capsys)
+    assert "at pools" in out
+    assert "26.3 reads 1 pool here, where the old form has 2 (26.3 lacks a pool of minecraft:book)" in out
+
+
+def test_e03_an_overlay_dropping_an_entry_fails(tmp_path, stubbed, capsys):
+    base = {"type": "minecraft:chest", "pools": [{"rolls": 1, "entries": [OLD_ENTRY, BOOK]}]}
+    out = _overlay_fails(tmp_path, base, _table(NEW_ENTRY), capsys)
+    assert "pools[0].entries" in out
+    assert "26.3 reads 1 entry here, where the old form has 2 (26.3 lacks minecraft:book): 26.3 loses it" in out
+
+
+def test_e04_an_overlay_rolling_another_item_fails(tmp_path, stubbed, capsys):
+    stone = dict(NEW_ENTRY, name="minecraft:stone")
+    out = _overlay_fails(tmp_path, _table(OLD_ENTRY), _table(stone), capsys)
+    assert "pools[0].entries[0].name" in out
+    assert '26.3 reads "minecraft:stone" here, but the old form gives "minecraft:diamond"' in out
+
+
+def test_e05_an_overlay_with_other_rolls_fails(tmp_path, stubbed, capsys):
+    base = {"type": "minecraft:chest", "pools": [{"rolls": 3, "entries": [OLD_ENTRY]}]}
+    out = _overlay_fails(tmp_path, base, _table(NEW_ENTRY), capsys)
+    assert "pools[0].rolls" in out and "26.3 reads 1 here, but the old form gives 3" in out
+
+
+def test_an_overlay_that_agrees_with_its_base_passes(tmp_path, stubbed, capsys):
+    base = {"type": "minecraft:chest", "pools": [{"rolls": 3.0, "entries": [OLD_ENTRY, BOOK],
+                                                  "conditions": [{"condition": "minecraft:random_chance",
+                                                                  "chance": 0.5}]}]}
+    overlay = {"type": "minecraft:chest", "pools": [{"rolls": 3, "entries": [NEW_ENTRY, BOOK_NEW],
+                                                     "condition": {"type": "random_chance", "chance": 0.5}}]}
+    root = _project(tmp_path, {"data/test/loot_table/t.json": base, "ov_26_3/data/test/loot_table/t.json": overlay},
+                    pack=OVERLAY_PACK)
+    passed, summary = _run(root, ["1.21", "26.2", "26.3"])
+    assert passed and "warning" not in summary, capsys.readouterr().out
 
 
 def test_a_predicate_naming_another_condition_in_each_form_fails(tmp_path, stubbed, capsys):
