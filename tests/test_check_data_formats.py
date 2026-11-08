@@ -719,3 +719,75 @@ def test_an_item_modifier_losing_its_condition_on_26_3_fails(tmp_path, stubbed, 
     assert not passed, out
     assert "condition.chance" in out and "26.3 reads 0.25 here, but the old form's `function` gives 0.5" in out
     assert "functions[1]" in out and "where the old form's `function` has a minecraft:enchant_randomly" in out
+
+
+# One test per comparison rule (each was a mutation no test caught).
+
+def _fails_at(tmp_path, table, where, capsys):
+    root = _project(tmp_path, {"data/test/loot_table/t.json": table})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert where in out, out
+    return out
+
+
+def test_rule_conditions_are_compared(tmp_path, stubbed, capsys):
+    entry = dict(OLD_ENTRY, modifier={"type": "minecraft:set_count", "count": 3},
+                 conditions=[{"condition": "minecraft:random_chance", "chance": 0.5}],
+                 condition={"type": "minecraft:random_chance", "chance": 0.25})
+    _fails_at(tmp_path, _table(entry), "pools[0].entries[0].condition.chance", capsys)
+
+
+def test_rule_children_and_inline_tables_are_compared(tmp_path, stubbed, capsys):
+    wrong = _dual([SET3], {"type": "minecraft:set_count", "count": 4})
+    alternatives = {"type": "minecraft:alternatives", "children": [wrong]}
+    _fails_at(tmp_path, _table(alternatives), "pools[0].entries[0].children[0].modifier[0].count", capsys)
+    inline = {"type": "minecraft:loot_table", "value": {"pools": [{"rolls": 1, "entries": [wrong]}]}}
+    _fails_at(tmp_path / "inline", _table(inline), "pools[0].entries[0].value.pools[0].entries[0].modifier[0].count",
+              capsys)
+
+
+def test_rule_pool_level_forms_are_compared(tmp_path, stubbed, capsys):
+    table = _table(DUAL_ENTRY, functions=[SET3], modifier={"type": "minecraft:set_count", "count": 2})
+    _fails_at(tmp_path, table, "pools[0].modifier[0].count", capsys)
+
+
+NESTED_OLD = [{"function": "minecraft:sequence", "functions": [SET3, ENCH]},
+              {"function": "minecraft:filtered", "item_filter": {"items": "minecraft:diamond"},
+               "on_pass": {"function": "minecraft:set_count", "count": 1}},
+              {"function": "minecraft:modify_contents", "component": "minecraft:container",
+               "modifier": {"function": "minecraft:set_count", "count": 2}}]
+NESTED_NEW = [{"type": "minecraft:sequence", "functions": [{"type": "minecraft:set_count", "count": 3},
+                                                          {"type": "minecraft:enchant_randomly"}]},
+              {"type": "minecraft:filtered", "item_filter": {"items": "minecraft:diamond"},
+               "on_pass": {"type": "minecraft:set_count", "count": 1}},
+              {"type": "minecraft:modify_contents", "component": "minecraft:container",
+               "modifier": {"type": "minecraft:set_count", "count": 2}}]
+
+
+def test_rule_nested_functions_are_converted(tmp_path, stubbed, capsys):
+    # sequence, filtered and modify_contents hold more functions: built in 26.3 form too
+    root = _project(tmp_path, {"data/test/loot_table/t.json": _table(_dual(NESTED_OLD, NESTED_NEW))})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+    wrong = json.loads(json.dumps(NESTED_NEW))
+    wrong[0]["functions"][1] = {"type": "minecraft:set_count", "count": 1}
+    _fails_at(tmp_path / "wrong", _table(_dual(NESTED_OLD, wrong)), "modifier[0].functions[1]", capsys)
+
+
+def test_rule_tag_entry_items_are_compared(tmp_path, stubbed, capsys):
+    entry = {"type": "minecraft:tag", "name": "minecraft:logs", "expand": True, "items": "#minecraft:planks"}
+    out = _fails_at(tmp_path, _table(entry), "pools[0].entries[0].items", capsys)
+    assert '`name` gives "#minecraft:logs"' in out
+
+
+def test_rule_map_destinations_become_tags(tmp_path, stubbed, monkeypatch, capsys):
+    monkeypatch.setitem(REGISTRIES, "tag/worldgen/structure", ["on_treasure_maps"])
+    old = [{"function": "minecraft:exploration_map", "destination": "minecraft:on_treasure_maps"}]
+    good = {"type": "minecraft:exploration_map", "destination": "#minecraft:on_treasure_maps"}
+    root = _project(tmp_path, {"data/test/loot_table/t.json": _table(_dual(old, good))})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+    bare = {"type": "minecraft:exploration_map", "destination": "minecraft:on_treasure_maps"}
+    _fails_at(tmp_path / "bare", _table(_dual(old, bare)), "modifier[0].destination", capsys)
