@@ -1,15 +1,19 @@
-"""Do the two loot forms in one file say the same thing?
+"""Do the two loot forms a pack carries say the same thing?
 
-A loot table written for 1.21 to 26.3 in one file carries both forms side by
-side: ``functions`` / ``conditions`` (1.21 to 26.2) and ``modifier`` /
-``condition`` (26.3). Each version reads only its own, so the file works on every
-version only if the two agree. A ``modifier`` missing a function the old form has
-is the issue-93 loss on 26.3 again, with both keys present.
+A loot table written for 1.21 to 26.3 carries both forms: ``functions`` /
+``conditions`` (1.21 to 26.2) and ``modifier`` / ``condition`` (26.3). Each
+version reads only its own, so the pack works on every version only if the two
+agree. A ``modifier`` missing a function the old form has is the issue-93 loss
+on 26.3 again, with both keys present.
+
+The two forms can sit side by side in one file, or in two files: a base file and
+a pack overlay that only one side loads. Either way, what the old side reads is
+compared with what 26.3 reads.
 
 This builds the 26.3 form from the old one, the way MFR's ``scripts/loot_26_3.py``
 writes it (Moog's Structure Lib's renames plus ``functions`` -> ``modifier`` and
-26.3's deeper renames), and compares it with what the file has, wherever a table,
-pool or entry carries both. The comparison reads both sides the way 26.3 does:
+26.3's deeper renames), and compares it with what 26.3 reads. Both sides are read
+the way 26.3 does:
 
 * a single ``modifier`` object and a one-item list are the same, as are one
   condition and an ``all_of`` of just that condition, and a condition list and
@@ -23,6 +27,7 @@ import json
 from typing import Iterable
 
 LOOT_RENAME = (26, 3)   # the first version that reads `modifier` / `condition` instead
+FORM_KINDS = ("loot_table",)
 
 _NESTED_FUNCTION_FIELDS = {
     "sequence": {"functions": "function_list"},
@@ -43,6 +48,9 @@ _MAP_TAGS_RENAMED = {
     "minecraft:on_trial_chambers_maps": "minecraft:on_buried_trial_chambers_maps",
     "minecraft:on_woodland_explorer_maps": "minecraft:on_woodland_mansion_maps",
 }
+
+DISAGREE = "forms-disagree"   # the two forms say different things: ERROR
+UNPAIRED = "forms-unpaired"   # an overlay laid out differently, so nothing can be paired: WARN
 
 
 class _Absent:
@@ -341,62 +349,96 @@ def _explain(want, have, root: str, old_label: str) -> tuple[str, str]:
 
 # --- the comparison ---------------------------------------------------------------------
 
-def disagreements(table, conv: Converter) -> list[tuple[str, str]]:
-    """``(path, message)`` for every place a table carries both forms that differ."""
-    out: list[tuple[str, str]] = []
-    if isinstance(table, dict):
-        _table(table, "", conv, out)
+def disagreements(kind: str, old, new, conv: Converter) -> list[tuple[str, str, str]]:
+    """``(path, code, message)`` for every place the old form (as 1.21 to 26.2 read
+    ``old``) and the 26.3 form (as 26.3 reads ``new``) differ. ``old`` and ``new``
+    are the same object when one file serves both sides."""
+    out: list[tuple[str, str, str]] = []
+    if kind == "loot_table" and isinstance(old, dict) and isinstance(new, dict):
+        _table(old, new, "", conv, out)
     return out
 
 
-def _table(t: dict, path: str, conv: Converter, out) -> None:
-    _site(t, path, conv, out)
-    for i, p in enumerate(t.get("pools") or [] if isinstance(t.get("pools"), list) else []):
-        if not isinstance(p, dict):
+def _join(path, k):
+    return f"{path}.{k}" if path else k
+
+
+def _paired(olds, news, path, what, out):
+    """Pairs by position, or nothing (and a warning) when the two copies differ in length."""
+    olds = olds if isinstance(olds, list) else []
+    news = news if isinstance(news, list) else []
+    if olds is news:
+        return list(enumerate(zip(olds, news)))
+    if len(olds) != len(news):
+        out.append((path, UNPAIRED, f"the old form has {len(olds)} {what} here and the 26.3 copy {len(news)}, so "
+                                    f"their functions and conditions cannot be paired; compare them by hand"))
+        return []
+    return list(enumerate(zip(olds, news)))
+
+
+def _table(o: dict, n: dict, path: str, conv: Converter, out) -> None:
+    _site(o, n, path, conv, out)
+    for i, (op, np_) in _paired(o.get("pools"), n.get("pools"), _join(path, "pools"), "pools", out):
+        if not (isinstance(op, dict) and isinstance(np_, dict)):
             continue
-        pp = f"{path}.pools[{i}]" if path else f"pools[{i}]"
-        _site(p, pp, conv, out)
-        for j, e in enumerate(p.get("entries") or [] if isinstance(p.get("entries"), list) else []):
-            _entry(e, f"{pp}.entries[{j}]", conv, out)
+        pp = f"{_join(path, 'pools')}[{i}]"
+        _site(op, np_, pp, conv, out)
+        for j, (oe, ne) in _paired(op.get("entries"), np_.get("entries"), f"{pp}.entries", "entries", out):
+            _entry(oe, ne, f"{pp}.entries[{j}]", conv, out)
 
 
-def _entry(e, path: str, conv: Converter, out) -> None:
-    if not isinstance(e, dict):
+def _entry(o, n, path: str, conv: Converter, out) -> None:
+    if not (isinstance(o, dict) and isinstance(n, dict)):
         return
-    _site(e, path, conv, out)
-    for k, c in enumerate(e.get("children") or [] if isinstance(e.get("children"), list) else []):
-        _entry(c, f"{path}.children[{k}]", conv, out)
-    if _short(e.get("type")) == "loot_table" and isinstance(e.get("value"), dict):
-        _table(e["value"], f"{path}.value", conv, out)
-    if _short(e.get("type")) == "tag" and isinstance(e.get("name"), str) and "items" in e:
-        want, have = _tagged(e["name"]), e["items"]
+    _site(o, n, path, conv, out)
+    for k, (oc, nc) in _paired(o.get("children"), n.get("children"), f"{path}.children", "children", out):
+        _entry(oc, nc, f"{path}.children[{k}]", conv, out)
+    if (_short(o.get("type")) == "loot_table" and isinstance(o.get("value"), dict)
+            and _short(n.get("type")) == "loot_table" and isinstance(n.get("value"), dict)):
+        _table(o["value"], n["value"], f"{path}.value", conv, out)
+    if _short(o.get("type")) == "tag" and isinstance(o.get("name"), str) and "items" in n:
+        want, have = _tagged(o["name"]), n["items"]
         if not (isinstance(have, str) and _tagged(have) == want):
-            out.append((f"{path}.items", f"26.3 reads `items` = {_short_json(have)}; the old form's "
-                                          f"`name` gives {_short_json(want)}"))
+            out.append((f"{path}.items", DISAGREE, f"26.3 reads `items` = {_short_json(have)}; the old form's "
+                                                   f"`name` gives {_short_json(want)}"))
 
 
-def _site(obj: dict, path: str, conv: Converter, out) -> None:
-    join = (lambda k: f"{path}.{k}" if path else k)
-    if "functions" in obj and "modifier" in obj and isinstance(obj["functions"], list):
-        _compare("modifier", "functions", conv.function_list(obj["functions"]), obj["modifier"], join, out)
-    if isinstance(obj.get("conditions"), list) and "condition" in obj:
-        _compare("condition", "conditions", conv.condition_list(obj["conditions"]), obj["condition"], join, out)
+def _site(o: dict, n: dict, path: str, conv: Converter, out) -> None:
+    for old_key, new_key, build in (("functions", "modifier", conv.function_list),
+                                    ("conditions", "condition", conv.condition_list)):
+        if not isinstance(o.get(old_key), list):
+            if new_key in n and old_key not in o and new_key not in o and n[new_key] not in (None, [], {}):
+                # only the 26.3 copy has it (another file): the old side never reads it
+                out.append((_join(path, new_key), DISAGREE,
+                            f"26.3 reads `{new_key}` = {_short_json(n[new_key])}, but the old form has no "
+                            f"`{old_key}` here: 1.21 to 26.2 lose it"))
+            continue
+        expected = build(o[old_key])
+        if new_key not in n:
+            if old_key in n or expected is None:
+                continue   # the 26.3 copy is in the old form: the version check reports it
+            out.append((_join(path, new_key), DISAGREE,
+                        f"26.3 reads no `{new_key}` here; the old form's `{old_key}` gives "
+                        f"{_short_json(expected)}: 26.3 loses it"))
+            continue
+        _compare(new_key, old_key, expected, n[new_key], path, out)
 
 
-def _compare(new_key: str, old_key: str, expected, actual, join, out) -> None:
+def _compare(new_key: str, old_key: str, expected, actual, path, out) -> None:
+    where = _join(path, new_key)
     if expected is None:
         # an empty old form: 26.3 must read nothing either
         if actual in (None, [], {}):
             return
-        out.append((join(new_key), f"the old form's `{old_key}` is empty, but 26.3 reads `{new_key}` = "
-                                   f"{_short_json(actual)}: 1.21 to 26.2 lose it"))
+        out.append((where, DISAGREE, f"the old form's `{old_key}` is empty, but 26.3 reads `{new_key}` = "
+                                     f"{_short_json(actual)}: 1.21 to 26.2 lose it"))
         return
     a, b = _norm(expected, new_key), _norm(actual, new_key)
     if a == b:
         return
     if actual in (None, [], {}):
-        out.append((join(new_key), f"26.3 reads `{new_key}`, which is empty; the old form's `{old_key}` "
-                                   f"gives {_short_json(expected)}: 26.3 loses it"))
+        out.append((where, DISAGREE, f"26.3 reads `{new_key}`, which is empty; the old form's `{old_key}` "
+                                     f"gives {_short_json(expected)}: 26.3 loses it"))
         return
-    where, msg = _explain(a, b, new_key, f"`{old_key}`")
-    out.append((join(where), msg))
+    at, msg = _explain(a, b, where, f"`{old_key}`")
+    out.append((at, DISAGREE, msg))

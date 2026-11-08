@@ -23,6 +23,10 @@ reads each one with that version's format (``core/formats.py``,
   kind, or a ``minecraft:`` id or tag that version does not have -- the game
   refuses the whole file there (ERROR).
 * a file in a folder spelling that version does not load (ERROR).
+* a loot table whose two forms disagree, where 1.21 to 26.2 read one form and
+  26.3 the other: side by side in one file, or across a base file and a pack
+  overlay that only one side loads (ERROR; an overlay laid out so differently
+  that nothing can be paired warns).
 
 A claimed version the format model has not been proven against fails too:
 the check cannot vouch for a version nobody has checked it against.
@@ -35,7 +39,7 @@ from typing import TYPE_CHECKING
 from core.claims import claimed_versions, resolve_claims
 from core.context import services
 from core.formats import Pack, classify, effective_files, load_model, neighbour_lists, read_tag, version_reader
-from core.loot_forms import LOOT_RENAME, Converter, disagreements
+from core.loot_forms import FORM_KINDS, LOOT_RENAME, UNPAIRED, Converter, disagreements
 from core.mcdoc import Finding, version_points
 from core.mcversions import parse_version
 from core import msl_upgrade
@@ -75,7 +79,7 @@ def _span(window) -> str:
 
 def _severity(f: Finding) -> str | None:
     """ERROR, WARN, or None (a dual-form key: fine)."""
-    if f.code in ("msl-upgrade", "no-such-kind"):
+    if f.code in ("msl-upgrade", "no-such-kind", UNPAIRED):
         return "WARN"
     if f.code == "foreign-key":
         if not f.counterparts:
@@ -174,7 +178,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         print(f"  [ERROR] {v}: the format model has not been proven against this version's vanilla data, "
               f"so nothing here can say what {v} does with this pack. Run tools/update_format_model.py.")
     resource_kinds = set(model.symbols["mcdoc/dispatcher"].get("minecraft:resource", {}))
-    loot_loaded: dict = defaultdict(set)   # loot table file -> versions that load it
+    # (kind, id) -> file -> versions that load it from that file (a base file, an overlay)
+    forms_loaded: dict = defaultdict(lambda: defaultdict(set))
     # findings[(display path, kind, finding identity)] -> versions, finding
     found: dict[tuple, list] = {}
     file_count: dict[str, set] = defaultdict(set)
@@ -235,8 +240,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                 continue
             file_count[res.kind].add(shown)
             loaded_kinds.add(res.kind)
-            if res.kind == "loot_table":
-                loot_loaded[path].update(group)
+            if res.kind in FORM_KINDS:
+                forms_loaded[(res.kind, res.id)][path].update(group)
             data_json = project.try_json(path)
             if data_json is None:
                 continue  # unreadable JSON is reported by the checks that own the file
@@ -300,8 +305,9 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                     continue
                 found.setdefault((shown, res.kind, _identity(f)), [[], f])[0].extend(group)
 
-    # Both loot forms in one file must say the same thing, wherever the claim
-    # spans a version that reads the old form and one that reads the new.
+    # The two loot forms must say the same thing, wherever the claim spans a
+    # version that reads the old form and one that reads the new: what each side
+    # loads for an id is compared, one file or two (a base file and an overlay).
     old_side = [v for v in checkable if parse_version(v) < LOOT_RENAME]
     new_side = [v for v in checkable if parse_version(v) >= LOOT_RENAME]
     if old_side and new_side:
@@ -312,13 +318,20 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             if r is not None and r.tag_registry == "worldgen/structure":
                 tags.add(r.id)
         conv = Converter(tags)
-        for path, vs in sorted(loot_loaded.items()):
-            if not (any(parse_version(v) < LOOT_RENAME for v in vs) and any(parse_version(v) >= LOOT_RENAME for v in vs)):
-                continue
-            shown = path.relative_to(resources).as_posix()
-            for where, msg in disagreements(project.try_json(path), conv):
-                f = Finding(where, "forms-disagree", detail=msg)
-                found.setdefault((shown, "loot_table", _identity(f)), [[], f])[0].extend(sorted(vs))
+        for (kind, _rid), by_path in sorted(forms_loaded.items()):
+            olds = {p: {v for v in vs if parse_version(v) < LOOT_RENAME} for p, vs in by_path.items()}
+            news = {p: {v for v in vs if parse_version(v) >= LOOT_RENAME} for p, vs in by_path.items()}
+            for po, vo in sorted(olds.items()):
+                for pn, vn in sorted(news.items()):
+                    if not vo or not vn:
+                        continue
+                    old = project.try_json(po)
+                    new = old if po == pn else project.try_json(pn)
+                    shown = pn.relative_to(resources).as_posix()
+                    other = "" if po == pn else f" (the old form is read from {po.relative_to(resources).as_posix()})"
+                    for where, code, msg in disagreements(kind, old, new, conv):
+                        f = Finding(where, code, detail=msg + other)
+                        found.setdefault((shown, kind, _identity(f)), [[], f])[0].extend(sorted(vo | vn))
 
     msl_short_warns: list[str] = []
     if uses_msl:

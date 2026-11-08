@@ -632,3 +632,45 @@ def test_another_function_in_one_place_is_named(tmp_path, stubbed, capsys):
     assert ("26.3 reads a minecraft:enchant_randomly here, where the old form's `functions` has a "
             "minecraft:set_count") in out
     assert "pools[0].entries[0].modifier[0]" in out
+
+
+OVERLAY_PACK = {"pack": {"pack_format": 48, "supported_formats": [48, 121], "min_format": 48, "max_format": 121},
+                "overlays": {"entries": [{"formats": [121, 121], "min_format": 121, "max_format": 121,
+                                          "directory": "ov_26_3"}]}}
+
+
+def test_forms_split_across_an_overlay_are_compared(tmp_path, stubbed, capsys):
+    # The base file has the enchant; the 26.3 overlay copy of the same table lost it.
+    base = _table({"type": "minecraft:item", "name": "minecraft:book", "functions": [SET3, ENCH]})
+    overlay = _table({"type": "minecraft:item", "name": "minecraft:book",
+                      "modifier": {"type": "minecraft:set_count", "count": 3}})
+    root = _project(tmp_path, {"data/test/loot_table/t.json": base, "ov_26_3/data/test/loot_table/t.json": overlay},
+                    pack=OVERLAY_PACK)
+    passed, _ = _run(root, ["1.21", "26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert "ov_26_3/data/test/loot_table/t.json" in out
+    assert "the old form is read from data/test/loot_table/t.json" in out
+    assert "pools[0].entries[0].modifier[1]" in out and "26.3 loses it" in out
+
+
+def test_an_overlay_copy_with_no_modifier_at_all_fails(tmp_path, stubbed, capsys):
+    base = _table(OLD_ENTRY)
+    overlay = _table({"type": "minecraft:item", "name": "minecraft:diamond"})
+    root = _project(tmp_path, {"data/test/loot_table/t.json": base, "ov_26_3/data/test/loot_table/t.json": overlay},
+                    pack=OVERLAY_PACK)
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert "26.3 reads no `modifier` here" in out
+
+
+def test_an_overlay_laid_out_differently_warns(tmp_path, stubbed, capsys):
+    # One entry dropped for 26.3: the entries cannot be paired, so nothing is judged.
+    base = {"type": "minecraft:chest", "pools": [{"rolls": 1, "entries": [OLD_ENTRY, OLD_ENTRY]}]}
+    root = _project(tmp_path, {"data/test/loot_table/t.json": base,
+                               "ov_26_3/data/test/loot_table/t.json": _table(NEW_ENTRY)}, pack=OVERLAY_PACK)
+    passed, summary = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert passed and "warning" in summary, out
+    assert "cannot be paired" in out
