@@ -218,16 +218,22 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                         f"this version has no `{res.kind}` data, so nothing reads this file here"))
                     found.setdefault((shown, res.kind, _identity(f)), [[], f])[0].extend(group)
                     continue
+                fs = reader.read(data_json, t)
                 if uses_msl and vt >= msl_upgrade.FIRST_VERSION:
                     # The game reads this file after Moog's Structure Lib's rewrite.
                     upgraded, rewrites = msl_upgrade.upgrade(res.kind, data_json, reader._registry("block"))
                     if rewrites:
-                        f = Finding("", "msl-upgrade", detail=(
-                            f"loads only because Moog's Structure Lib rewrites {rewrites} old-form "
-                            f"value(s) on load (its 26.3 builds); the file itself is not in this version's form"))
-                        found.setdefault((shown, res.kind, _identity(f)), [[], f])[0].extend(group)
-                        data_json = upgraded
-                fs = reader.read(data_json, t)
+                        after = reader.read(upgraded, t)
+                        kept = {_identity(x) for x in after}
+                        rescued = [x for x in fs if _severity(x) == "ERROR" and _identity(x) not in kept
+                                   and model.gap_for(res.kind, v, x) is None]
+                        if rescued:
+                            # Only when the rewrite changes what this version does:
+                            # rewrites inside a form this version ignores do not count.
+                            first = rescued[0]
+                            f = Finding("", "msl-upgrade", detail=f"{first.path or '(file)'}: {_message(first)}")
+                            found.setdefault((shown, res.kind, ("msl-upgrade",)), [[], f])[0].extend(group)
+                        fs = after
             for f in fs:
                 gap = model.gap_for(res.kind, v, f)
                 if gap is not None and gap.get("scope") == "model":
@@ -245,9 +251,12 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     # Report: errors first, grouped by file, versions folded into ranges.
     by_file: dict[tuple[str, str], list] = defaultdict(list)
     msl_files: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    msl_examples: dict[str, tuple[str, str]] = {}
     for (shown, kind, _ident), (vs, f) in found.items():
         if f.code == "msl-upgrade":
-            msl_files[_ranges(sorted(set(vs), key=order.index), order)][kind].append(shown)
+            vr = _ranges(sorted(set(vs), key=order.index), order)
+            msl_files[vr][kind].append(shown)
+            msl_examples.setdefault(vr, (shown, f.detail))
             continue
         by_file[(shown, "ERROR" if f.code == "not-loaded" else _severity(f))].append((vs, f, kind))
 
@@ -285,10 +294,12 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         warns += n
         listing = ", ".join(f"{k} ({len(v)})" for k, v in sorted(kinds.items()))
         print(f"  [WARN] on {vr}: {n} file(s) load only because Moog's Structure Lib rewrites their "
-              f"pre-26.3 values on load (block states, conditions, function ids, number ranges): {listing}. "
-              f"They work with MSL's 26.3 builds; the files themselves are not in 26.3 form.")
+              f"pre-26.3 values on load (block states, conditions, function ids, typeless number ranges): "
+              f"{listing}. They work with MSL's 26.3 builds; without MSL this version would refuse them.")
         sample = [p for v in kinds.values() for p in v][:MAX_EXAMPLES]
         print(f"      e.g. {', '.join(sample)}")
+        if msl_examples.get(vr):
+            print(f"      first in {msl_examples[vr][0]}: {msl_examples[vr][1]}")
 
     total_files = len({s for fs in file_count.values() for s in fs})
     print("  by kind:")

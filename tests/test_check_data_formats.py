@@ -140,8 +140,19 @@ def test_msl_rewrite_rescues_conditions_but_not_functions(tmp_path, stubbed, cap
     out = capsys.readouterr().out
     assert not passed
     assert "`functions` is ignored" in out
-    assert "`conditions` is ignored" not in out
+    # the conditions are named only as what MSL's rewrite rescues, never as an error
+    lines = [line for line in out.splitlines() if "`conditions` is ignored" in line]
+    assert len(lines) == 1 and lines[0].lstrip().startswith("first in")
     assert "Moog's Structure Lib rewrites" in out
+
+
+def test_msl_rewrite_inside_an_ignored_form_is_not_reported(tmp_path, stubbed, capsys):
+    # Both forms, typed ranges: MSL still renames `function` inside the old
+    # `functions` list, but 26.3 ignores that list, so nothing depends on MSL.
+    table = {"type": "minecraft:chest", "pools": [{"rolls": 1, "entries": [DUAL_ENTRY]}]}
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": table}, msl=True)
+    passed, summary = _run(root, ["26.2", "26.3"])
+    assert passed and "warning" not in summary, capsys.readouterr().out
 
 
 def test_msl_rewrite_alone_is_a_warning(tmp_path, stubbed, capsys):
