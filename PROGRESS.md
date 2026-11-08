@@ -7,8 +7,10 @@
 - [x] `data/format_model/` -- symbols pinned at vanilla-mcdoc 1a674539; proven clean against vanilla data of all 24 releases 1.20-26.3; 2 patches (enchant_randomly `options`, `only_compatible` since 1.21), 3 model gaps, 1 vanilla bug
 - [x] 26.3 behaviour checked in the 26.3 jar's own codecs (javap + a JsonOps harness): pool keys, `Identifier` default namespace, block state `id`/`properties`, typed int providers
 - [x] MSL modelled per version for the oldest MSL a mod allows (`data/msl_builds.json`: oldest build per MC version from Modrinth; 26.3 rewrite from 3.3.0, trial spawner configs on 1.21-1.21.1 from 3.0.0); too-low minimums warn
-- [x] `data/allowed_keys.json` -- harmless keys no version reads (1 entry)
-- [x] `tests/test_check_data_formats.py` (28 tests)
+- [x] `data/allowed_keys.json` -- harmless keys no version reads (1 entry, matched on its value)
+- [x] review fixes: both-forms agreement (`core/loot_forms.py`), `--require-claim` / GITHUB_ACTIONS, MSL-minimum and removed-key errors, per-rewrite MSL releases, both folder spellings, strings and nulls, unreadable JSON
+- [x] `check_worldgen_schemas`: `moogs_structures:` types gated by first MSL release (`_MSL_TYPE_SINCE`)
+- [x] `tests/test_check_data_formats.py` (44 tests), 3 more in `tests/test_worldgen_schemas.py`
 - [x] fleet: 20 checkouts read only; per-mod audit in the session report
 
 ## v1.12.0 (2026-09-24)
