@@ -79,7 +79,9 @@ def _severity(f: Finding) -> str | None:
         return "WARN"
     if f.code == "foreign-key":
         if not f.counterparts:
-            return "WARN"
+            # Removed or moved before this version: what it carried is lost. A key
+            # that only arrives later is a feature this version does not have yet.
+            return "ERROR" if f.retired else "WARN"
         return None if f.counterpart_present else "ERROR"
     return "ERROR"
 
@@ -87,6 +89,9 @@ def _severity(f: Finding) -> str | None:
 def _message(f: Finding) -> str:
     if f.code == "foreign-key":
         if not f.counterparts:
+            if f.retired:
+                return (f"`{f.key}` is ignored ({_span(f.known_window)}): it was removed or moved, and this "
+                        f"object has nothing this version reads in its place")
             return f"`{f.key}` is ignored ({_span(f.known_window)}; nothing replaces it here)"
         reads = ", ".join(f"`{c}`" for c in f.counterparts)
         return f"`{f.key}` is ignored ({_span(f.known_window)}); this version reads {reads} instead, which is absent"

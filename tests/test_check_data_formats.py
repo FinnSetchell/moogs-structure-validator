@@ -21,6 +21,7 @@ from tests.nbt_helpers import FakeContext
 # Stable releases as mcmeta reports them, with data pack formats.
 VERSIONS = [
     ("1.20.6", 3839, 41, 0), ("1.21", 3953, 48, 0), ("1.21.1", 3955, 48, 0),
+    ("1.21.4", 4189, 61, 0), ("1.21.5", 4325, 71, 0),
     ("26.2", 4903, 107, 1), ("26.3", 5023, 121, 0), ("26.4", 5130, 130, 0),
 ]
 
@@ -253,7 +254,7 @@ def test_publish_manifest_claim_beyond_validator_json_fails(tmp_path, stubbed, c
     root = _project(tmp_path, {})
     (root / ".github").mkdir()
     (root / ".github" / "moogs-publish.yml").write_text(MANIFEST, encoding="utf-8")
-    passed, summary = _run(root, ["1.21", "1.21.1", "26.2"], check=check_claimed_versions)
+    passed, summary = _run(root, ["1.21", "1.21.1", "1.21.4", "1.21.5", "26.2"], check=check_claimed_versions)
     out = capsys.readouterr().out
     assert not passed
     assert "claimed but never checked: 26.3" in out
@@ -262,7 +263,7 @@ def test_publish_manifest_claim_beyond_validator_json_fails(tmp_path, stubbed, c
 def test_claims_covered_by_validator_json_pass(tmp_path, stubbed):
     pack = {"pack": {"pack_format": 48, "supported_formats": [48, 121]}}
     root = _project(tmp_path, {}, pack=pack)
-    passed, _ = _run(root, ["1.21", "1.21.1", "26.2", "26.3"], check=check_claimed_versions)
+    passed, _ = _run(root, ["1.21", "1.21.1", "1.21.4", "1.21.5", "26.2", "26.3"], check=check_claimed_versions)
     assert passed
 
 
@@ -510,3 +511,24 @@ def test_github_actions_requires_a_claim(tmp_path, stubbed, monkeypatch, capsys)
     passed, _ = _run(root, ["1.21", "1.21.1"], check=check_claimed_versions)
     assert not passed
     assert "GITHUB_ACTIONS is set" in capsys.readouterr().out
+
+
+SHEEP = {"condition": "minecraft:entity_properties", "entity": "this",
+         "predicate": {"type_specific": {"type": "minecraft:sheep", "color": "white"}}}
+
+
+def test_a_key_removed_before_the_version_is_an_error(tmp_path, stubbed, capsys):
+    # The sheep colour moved into components at 1.21.5: the condition stops checking it.
+    root = _project(tmp_path, {"data/test/loot_table/a.json": _table(OLD_ENTRY, conditions=[SHEEP])})
+    passed, summary = _run(root, ["1.21.4", "1.21.5"])
+    out = capsys.readouterr().out
+    assert not passed and "on 1.21.5" in summary
+    assert "`color` is ignored" in out and "removed or moved" in out
+
+
+def test_a_key_that_only_arrives_later_is_a_warning(tmp_path, stubbed, capsys):
+    entry = {"type": "minecraft:item", "name": "minecraft:book",
+             "functions": [{"function": "minecraft:enchant_randomly", "include_additional_cost_component": True}]}
+    root = _project(tmp_path, {"data/test/loot_table/a.json": _table(entry)})
+    passed, summary = _run(root, ["1.21.1"])
+    assert passed and "warning" in summary, capsys.readouterr().out

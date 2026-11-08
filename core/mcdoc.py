@@ -201,6 +201,9 @@ class Finding:
     # unknown-key / foreign-key: the type id of the object the key sits on
     # (a loot function's `function`, a processor's `processor_type` ...).
     on: str | None = None
+    # foreign-key: the key's window ended at or before this version (removed or
+    # moved), rather than starting after it.
+    retired: bool = False
 
 
 _INDEX = re.compile(r"\[\d+\]")
@@ -706,7 +709,7 @@ class Reader:
         names = tuple(sorted(f.key for f in counterparts))
         present = any(n in value for n in names)
         out.append(Finding(path, "foreign-key", key=k, counterparts=names, counterpart_present=present,
-                           known_window=known, on=_object_type(value)))
+                           known_window=known, on=_object_type(value), retired=bool(before)))
 
     def _leaves(self, m, env, win, depth: int = 0):
         """Struct-like members of a (possibly nested) union, with their windows."""
