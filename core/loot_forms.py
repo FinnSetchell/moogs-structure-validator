@@ -8,7 +8,9 @@ on 26.3 again, with both keys present.
 
 The two forms can sit side by side in one file, or in two files: a base file and
 a pack overlay that only one side loads. Either way, what the old side reads is
-compared with what 26.3 reads.
+compared with what 26.3 reads. Item modifier and predicate files carry both
+forms in one object (``function`` and ``type``, ``conditions`` and
+``condition``), so the whole object is compared.
 
 This builds the 26.3 form from the old one, the way MFR's ``scripts/loot_26_3.py``
 writes it (Moog's Structure Lib's renames plus ``functions`` -> ``modifier`` and
@@ -27,7 +29,7 @@ import json
 from typing import Iterable
 
 LOOT_RENAME = (26, 3)   # the first version that reads `modifier` / `condition` instead
-FORM_KINDS = ("loot_table",)
+FORM_KINDS = ("loot_table", "item_modifier", "predicate")
 
 _NESTED_FUNCTION_FIELDS = {
     "sequence": {"functions": "function_list"},
@@ -232,6 +234,118 @@ class Converter:
         return e
 
 
+# --- what each side reads of an object written in both forms at once ----------------------
+# Item modifier and predicate files carry both forms in one object. 1.21 to 26.2
+# dispatch on `function` / `condition` and skip `type` and the 26.3 keys; 26.3
+# dispatches on `type` and skips the old keys.
+
+def old_function(f):
+    if not isinstance(f, dict) or "function" not in f:
+        return f
+    out = {k: v for k, v in f.items() if k not in ("type", "condition")}
+    for k, kind in _NESTED_FUNCTION_FIELDS.get(_short(_ns(f["function"])), {}).items():
+        if k in out:
+            out[k] = _map(out[k], kind, old_function, old_entry)
+    if isinstance(out.get("conditions"), list):
+        out["conditions"] = [old_condition(c) for c in out["conditions"]]
+    return out
+
+
+def new_function(f):
+    if not isinstance(f, dict) or "type" not in f:
+        return f
+    out = {k: v for k, v in f.items() if k not in ("function", "conditions")}
+    for k, kind in _NESTED_FUNCTION_FIELDS.get(_short(_ns(f["type"])), {}).items():
+        if k in out:
+            out[k] = _map(out[k], kind, new_function, new_entry)
+    if "condition" in out:
+        out["condition"] = new_condition(out["condition"])
+    return out
+
+
+def _map(v, kind, fn, entry):
+    if kind == "function":
+        return fn(v)
+    if kind == "function_list":
+        return [fn(x) for x in v] if isinstance(v, list) else fn(v)
+    if kind == "entry_list" and isinstance(v, list):
+        return [entry(e) for e in v]
+    return v
+
+
+def old_condition(c):
+    if isinstance(c, list):
+        return [old_condition(x) for x in c]
+    if not isinstance(c, dict) or not isinstance(c.get("condition"), str):
+        return c
+    sid = _short(_ns(c["condition"]))
+    drop = {"type", "blocks", "state"} if sid == "block_state_property" else {"type"}
+    out = {k: v for k, v in c.items() if k not in drop}
+    return _nested_conditions(out, sid, old_condition)
+
+
+def new_condition(c):
+    if isinstance(c, list):
+        return [new_condition(x) for x in c]
+    if not isinstance(c, dict) or not isinstance(c.get("type"), str):
+        return c
+    sid = _short(_ns(c["type"]))
+    drop = {"condition", "block", "properties"} if sid == "match_block" else {"condition"}
+    out = {k: v for k, v in c.items() if k not in drop}
+    return _nested_conditions(out, sid, new_condition)
+
+
+def _nested_conditions(out, sid, fn):
+    for k, kind in _NESTED_CONDITION_FIELDS.get(sid, {}).items():
+        if k in out:
+            out[k] = fn(out[k]) if kind == "condition" else (
+                [fn(x) for x in out[k]] if isinstance(out[k], list) else out[k])
+    return out
+
+
+def old_entry(e):
+    """An entry (a set_contents list in an item modifier written in both forms)."""
+    if not isinstance(e, dict):
+        return e
+    tag = _short(e.get("type")) == "tag" and "name" in e
+    out = {k: v for k, v in e.items() if k not in ("modifier", "condition") and not (tag and k == "items")}
+    if isinstance(out.get("functions"), list):
+        out["functions"] = [old_function(f) for f in out["functions"]]
+    if isinstance(out.get("conditions"), list):
+        out["conditions"] = [old_condition(c) for c in out["conditions"]]
+    if isinstance(out.get("children"), list):
+        out["children"] = [old_entry(c) for c in out["children"]]
+    if _short(e.get("type")) == "loot_table" and isinstance(out.get("value"), dict):
+        out["value"] = _table_view(out["value"], old_entry, ("modifier", "condition"))
+    return out
+
+
+def new_entry(e):
+    if not isinstance(e, dict):
+        return e
+    tag = _short(e.get("type")) == "tag" and "items" in e
+    out = {k: v for k, v in e.items() if k not in ("functions", "conditions") and not (tag and k == "name")}
+    if "modifier" in out:
+        out["modifier"] = _map(out["modifier"], "function_list", new_function, new_entry)
+    if "condition" in out:
+        out["condition"] = new_condition(out["condition"])
+    if isinstance(out.get("children"), list):
+        out["children"] = [new_entry(c) for c in out["children"]]
+    if _short(e.get("type")) == "loot_table" and isinstance(out.get("value"), dict):
+        out["value"] = _table_view(out["value"], new_entry, ("functions", "conditions"))
+    return out
+
+
+def _table_view(t, entry, drop):
+    out = {k: v for k, v in t.items() if k not in drop}
+    if isinstance(out.get("pools"), list):
+        out["pools"] = [
+            dict({k: v for k, v in p.items() if k not in drop},
+                 **({"entries": [entry(x) for x in p["entries"]]} if isinstance(p.get("entries"), list) else {}))
+            if isinstance(p, dict) else p for p in out["pools"]]
+    return out
+
+
 # --- reading both sides the way 26.3 does --------------------------------------------
 
 def _norm_condition(c):
@@ -354,9 +468,45 @@ def disagreements(kind: str, old, new, conv: Converter) -> list[tuple[str, str, 
     ``old``) and the 26.3 form (as 26.3 reads ``new``) differ. ``old`` and ``new``
     are the same object when one file serves both sides."""
     out: list[tuple[str, str, str]] = []
-    if kind == "loot_table" and isinstance(old, dict) and isinstance(new, dict):
-        _table(old, new, "", conv, out)
+    if kind == "loot_table":
+        if isinstance(old, dict) and isinstance(new, dict):
+            _table(old, new, "", conv, out)
+    elif kind == "item_modifier":
+        _each(old, new, conv, out, _function_pair, "function")
+    elif kind == "predicate":
+        if isinstance(old, dict) and isinstance(new, dict):
+            _condition_pair(old, new, "", conv, out)
     return out
+
+
+def _each(old, new, conv, out, pair, what):
+    if isinstance(old, dict) and isinstance(new, dict):
+        pair(old, new, "", conv, out)
+    elif isinstance(old, list) and isinstance(new, list):
+        if len(old) != len(new):
+            out.append(("", UNPAIRED, f"the old form lists {len(old)} {what}s and the 26.3 copy {len(new)}, so "
+                                      f"they cannot be paired; compare them by hand"))
+            return
+        for i, (o, n) in enumerate(zip(old, new)):
+            pair(o, n, f"[{i}]", conv, out)
+
+
+def _function_pair(o, n, path, conv, out):
+    if not (isinstance(o, dict) and "function" in o and isinstance(n, dict) and "type" in n):
+        return   # one side has no form of its own here: the version check reports it
+    want, have = _norm(conv.function(old_function(o)), None), _norm(new_function(n), None)
+    if want != have:
+        where, msg = _explain(want, have, path, "`function`")
+        out.append((where, DISAGREE, msg))
+
+
+def _condition_pair(o, n, path, conv, out):
+    if not (isinstance(o.get("condition"), str) and isinstance(n.get("type"), str)):
+        return
+    want, have = _norm_condition(conv.condition(old_condition(o))), _norm_condition(new_condition(n))
+    if want != have:
+        where, msg = _explain(want, have, path, "`condition`")
+        out.append((where, DISAGREE, msg))
 
 
 def _join(path, k):

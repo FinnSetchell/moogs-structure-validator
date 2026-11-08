@@ -674,3 +674,48 @@ def test_an_overlay_laid_out_differently_warns(tmp_path, stubbed, capsys):
     out = capsys.readouterr().out
     assert passed and "warning" in summary, out
     assert "cannot be paired" in out
+
+
+def test_a_predicate_naming_another_condition_in_each_form_fails(tmp_path, stubbed, capsys):
+    # 1.21 to 26.2 read a random chance; 26.3 reads survives_explosion.
+    pred = {"condition": "minecraft:random_chance", "type": "minecraft:survives_explosion", "chance": 0.5}
+    root = _project(tmp_path, {"data/test/predicate/p.json": pred})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert ("26.3 reads a minecraft:survives_explosion here, where the old form's `condition` has a "
+            "minecraft:random_chance") in out
+
+
+def test_predicate_and_item_modifier_as_the_converter_writes_them_pass(tmp_path, stubbed, capsys):
+    # Exactly what MFR's scripts/loot_26_3.py writes: both forms merged in one object.
+    pred = {"condition": "minecraft:all_of", "type": "minecraft:all_of", "terms": [
+        {"condition": "minecraft:random_chance", "type": "minecraft:random_chance", "chance": 0.5},
+        {"condition": "minecraft:survives_explosion", "type": "minecraft:survives_explosion"}]}
+    one = {"function": "minecraft:set_count", "type": "minecraft:set_count", "count": 2,
+           "conditions": [{"condition": "minecraft:random_chance", "chance": 0.5}],
+           "condition": {"type": "minecraft:random_chance", "chance": 0.5}}
+    # (one object: 26.3 loads an item modifier file with the single-function codec, so
+    # a list file, which 1.21 to 26.2 read as a sequence, is refused there)
+    seq = {"function": "minecraft:sequence", "type": "minecraft:sequence", "functions": [
+        {"function": "minecraft:set_count", "type": "minecraft:set_count", "count": 2},
+        {"function": "minecraft:enchant_randomly", "type": "minecraft:enchant_randomly"}]}
+    root = _project(tmp_path, {"data/test/predicate/p.json": pred, "data/test/item_modifier/one.json": one,
+                               "data/test/item_modifier/seq.json": seq})
+    passed, _ = _run(root, ["1.21", "26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+
+
+def test_an_item_modifier_losing_its_condition_on_26_3_fails(tmp_path, stubbed, capsys):
+    im = {"function": "minecraft:set_count", "type": "minecraft:set_count", "count": 2,
+          "conditions": [{"condition": "minecraft:random_chance", "chance": 0.5}],
+          "condition": {"type": "minecraft:random_chance", "chance": 0.25}}
+    seq = {"function": "minecraft:sequence", "type": "minecraft:sequence", "functions": [
+        {"function": "minecraft:set_count", "type": "minecraft:set_count", "count": 2},
+        {"function": "minecraft:enchant_randomly", "type": "minecraft:set_count", "count": 2}]}
+    root = _project(tmp_path, {"data/test/item_modifier/im.json": im, "data/test/item_modifier/seq.json": seq})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert "condition.chance" in out and "26.3 reads 0.25 here, but the old form's `function` gives 0.5" in out
+    assert "functions[1]" in out and "where the old form's `function` has a minecraft:enchant_randomly" in out

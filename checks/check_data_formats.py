@@ -23,10 +23,11 @@ reads each one with that version's format (``core/formats.py``,
   kind, or a ``minecraft:`` id or tag that version does not have -- the game
   refuses the whole file there (ERROR).
 * a file in a folder spelling that version does not load (ERROR).
-* a loot table whose two forms disagree, where 1.21 to 26.2 read one form and
-  26.3 the other: side by side in one file, or across a base file and a pack
-  overlay that only one side loads (ERROR; an overlay laid out so differently
-  that nothing can be paired warns).
+* a loot table, item modifier or predicate whose two forms disagree, where 1.21
+  to 26.2 read one form and 26.3 the other: side by side in one file (one object,
+  for item modifiers and predicates), or across a base file and a pack overlay
+  that only one side loads (ERROR; an overlay laid out so differently that
+  nothing can be paired warns).
 
 A claimed version the format model has not been proven against fails too:
 the check cannot vouch for a version nobody has checked it against.
