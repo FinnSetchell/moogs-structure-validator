@@ -135,10 +135,14 @@ vanilla-mcdoc symbol table pinned in `data/format_model/`:
   with its own first release in `REWRITE_SINCE`, so a mod is credited with it only
   once its minimum reaches that release.
 - `core/loot_forms.py` -- builds the 26.3 loot form from the old one (the mapping
-  of MFR's `scripts/loot_26_3.py`) and compares it with a file's own 26.3 form,
-  wherever a table, pool or entry carries both. Keep it in step with that script.
+  of MFR's `scripts/loot_26_3.py`) and compares it with what 26.3 reads: in one
+  file, across a base file and an overlay, and in one object for item modifiers
+  and predicates. Keep it in step with that script; `tests/test_check_data_formats.py`
+  has one test per comparison rule.
 - `checks/check_worldgen_schemas.py` `_MSL_TYPE_SINCE` -- the first MSL release of
   each `moogs_structures:` type. Add a type MSL adds, with the release it ships in.
+  `_MSL_FIELD_SINCE` does the same for a field MSL adds to a type that already
+  exists (find it with `git grep -E '[fF]ieldOf\("' <tag>` on each tag).
 - `data/msl_builds.json` -- the oldest MSL published for each Minecraft version
   (from Modrinth) and, per MSL behaviour the check models, the Minecraft window and
   the first MSL release that has it, with the source file. When MSL gains a data

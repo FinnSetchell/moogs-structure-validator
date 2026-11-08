@@ -10,7 +10,8 @@
 - [x] `data/allowed_keys.json` -- harmless keys no version reads (1 entry, matched on its value)
 - [x] review fixes: both-forms agreement (`core/loot_forms.py`), `--require-claim` / GITHUB_ACTIONS, MSL-minimum and removed-key errors, per-rewrite MSL releases, both folder spellings, strings and nulls, unreadable JSON
 - [x] `check_worldgen_schemas`: `moogs_structures:` types gated by first MSL release (`_MSL_TYPE_SINCE`)
-- [x] `tests/test_check_data_formats.py` (42 tests), 3 more in `tests/test_worldgen_schemas.py`
+- [x] second review: forms compared across overlays and in item modifiers and predicates, inline tables in `set_contents`, plain difference messages, one test per comparison rule, MSL fields gated (`_MSL_FIELD_SINCE`)
+- [x] `tests/test_check_data_formats.py` (56 tests), 6 more in `tests/test_worldgen_schemas.py`
 - [x] fleet: 20 checkouts read only; per-mod audit in the session report
 
 ## v1.12.0 (2026-09-24)
