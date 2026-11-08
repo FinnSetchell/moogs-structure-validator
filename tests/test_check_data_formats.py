@@ -26,7 +26,7 @@ VERSIONS = [
 
 REGISTRIES = {
     "loot_function_type": ["set_count", "enchant_randomly", "enchant_with_levels"],
-    "loot_condition_type": ["random_chance", "survives_explosion"],
+    "loot_condition_type": ["random_chance", "survives_explosion", "all_of", "entity_properties"],
     "item": ["diamond", "book", "iron_ingot", "stone"],
     "block": ["stone", "water", "iron_chain"],
     "worldgen/biome": ["plains", "desert"],
@@ -427,3 +427,63 @@ def test_allowlisted_key_passes_and_the_same_key_elsewhere_does_not(tmp_path, st
     passed, _ = _run(root2, ["1.21"])
     assert not passed
     assert "`only_compatible` is read by no version" in capsys.readouterr().out
+
+
+# --- review fixes (2026-11-08) ---------------------------------------------------------
+
+SET3 = {"function": "minecraft:set_count", "count": 3}
+ENCH = {"function": "minecraft:enchant_randomly"}
+
+
+def _dual(functions, modifier):
+    return {"type": "minecraft:item", "name": "minecraft:diamond", "functions": functions, "modifier": modifier}
+
+
+@pytest.mark.parametrize("entry", [
+    _dual([SET3], []),                                                    # 26.3 loses the count
+    _dual([SET3, ENCH], [{"type": "minecraft:set_count", "count": 3}]),  # 26.3 loses the enchant
+    _dual([], [{"type": "minecraft:set_count", "count": 3}]),             # 1.21-26.2 lose the count
+])
+def test_both_forms_present_but_disagreeing_fail(tmp_path, stubbed, capsys, entry):
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": _table(entry)})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert "pools[0].entries[0].modifier" in out
+    assert "disagree" in out or "loses it" in out or "lose it" in out
+
+
+def test_agreeing_forms_pass_whatever_their_layout(tmp_path, stubbed, capsys):
+    # one modifier object for a one-item list; all_of for a condition list; 3.0 for 3
+    entry = {"type": "minecraft:item", "name": "minecraft:diamond",
+             "functions": [{"function": "set_count", "count": 3.0}],
+             "modifier": {"type": "minecraft:set_count", "count": 3}}
+    table = _table(entry, conditions=[{"condition": "minecraft:random_chance", "chance": 0.5},
+                                      {"condition": "minecraft:survives_explosion"}],
+                   condition={"type": "minecraft:all_of", "terms": [
+                       {"type": "minecraft:random_chance", "chance": 0.5},
+                       {"type": "minecraft:survives_explosion"}]})
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": table})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+
+
+def test_library_table_edited_in_one_form_only_fails(tmp_path, stubbed, capsys):
+    # The review's case on MFR intact/library.json: an enchant added to the book's
+    # old form only, and the paper's 26.3 form emptied.
+    book = {"type": "minecraft:item", "name": "minecraft:book",
+            "functions": [{"function": "minecraft:set_count",
+                           "count": {"type": "minecraft:uniform", "min": 1, "max": 3}},
+                          {"function": "minecraft:enchant_randomly"}],
+            "modifier": {"type": "minecraft:set_count", "count": {"type": "minecraft:uniform", "min": 1, "max": 3}}}
+    paper = {"type": "minecraft:item", "name": "minecraft:diamond",
+             "functions": [{"function": "minecraft:set_count",
+                            "count": {"type": "minecraft:uniform", "min": 2, "max": 7}}],
+             "modifier": []}
+    table = {"type": "minecraft:chest", "pools": [{"rolls": 1, "entries": [book, paper]}]}
+    root = _project(tmp_path, {"data/test/loot_table/library.json": table}, msl=True)
+    passed, _ = _run(root, ["1.21", "26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed
+    assert "pools[0].entries[0].modifier" in out and "enchant_randomly" in out
+    assert "pools[0].entries[1].modifier" in out

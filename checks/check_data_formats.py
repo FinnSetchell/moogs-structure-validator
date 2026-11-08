@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 from core.claims import claimed_versions, resolve_claims
 from core.context import services
 from core.formats import Pack, classify, effective_files, load_model, neighbour_lists, read_tag, version_reader
+from core.loot_forms import LOOT_RENAME, Converter, disagreements
 from core.mcdoc import Finding, version_points
 from core.mcversions import parse_version
 from core import msl_upgrade
@@ -166,6 +167,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         print(f"  [ERROR] {v}: the format model has not been proven against this version's vanilla data, "
               f"so nothing here can say what {v} does with this pack. Run tools/update_format_model.py.")
     resource_kinds = set(model.symbols["mcdoc/dispatcher"].get("minecraft:resource", {}))
+    loot_loaded: dict = defaultdict(set)   # loot table file -> versions that load it
     # findings[(display path, kind, finding identity)] -> versions, finding
     found: dict[tuple, list] = {}
     file_count: dict[str, set] = defaultdict(set)
@@ -214,6 +216,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                 continue
             file_count[res.kind].add(shown)
             loaded_kinds.add(res.kind)
+            if res.kind == "loot_table":
+                loot_loaded[path].update(group)
             data_json = project.try_json(path)
             if data_json is None:
                 continue  # unreadable JSON is reported by the checks that own the file
@@ -275,6 +279,26 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                         dual += 1
                     continue
                 found.setdefault((shown, res.kind, _identity(f)), [[], f])[0].extend(group)
+
+    # Both loot forms in one file must say the same thing, wherever the claim
+    # spans a version that reads the old form and one that reads the new.
+    old_side = [v for v in checkable if parse_version(v) < LOOT_RENAME]
+    new_side = [v for v in checkable if parse_version(v) >= LOOT_RENAME]
+    if old_side and new_side:
+        newest = svc.mcmeta.data(new_side[-1])
+        tags = {"minecraft:" + t for t in newest.get("tag/worldgen/structure", [])}
+        for rel in project.json_files(project.data_root):
+            r = classify(rel.relative_to(project.data_root).as_posix(), resource_kinds, set())
+            if r is not None and r.tag_registry == "worldgen/structure":
+                tags.add(r.id)
+        conv = Converter(tags)
+        for path, vs in sorted(loot_loaded.items()):
+            if not (any(parse_version(v) < LOOT_RENAME for v in vs) and any(parse_version(v) >= LOOT_RENAME for v in vs)):
+                continue
+            shown = path.relative_to(resources).as_posix()
+            for where, msg in disagreements(project.try_json(path), conv):
+                f = Finding(where, "forms-disagree", detail=msg)
+                found.setdefault((shown, "loot_table", _identity(f)), [[], f])[0].extend(sorted(vs))
 
     msl_short_warns: list[str] = []
     if uses_msl:
