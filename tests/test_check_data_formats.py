@@ -552,3 +552,17 @@ def test_both_folder_spellings_each_loaded_by_their_own_versions_pass(tmp_path, 
                                "data/test/loot_table/chest.json": _table(OLD_ENTRY)})
     passed, _ = _run(root, ["1.20.6", "1.21"])
     assert passed, capsys.readouterr().out
+
+
+def test_a_string_where_a_number_is_read_and_a_null_required_field_fail(tmp_path, stubbed, capsys):
+    entry = {"type": "minecraft:item", "name": "minecraft:diamond",
+             "functions": [{"function": "minecraft:set_count", "count": "3"}]}
+    root = _project(tmp_path, {"data/test/loot_table/a.json": _table(entry),
+                               "data/test/loot_table/b.json": {"pools": [{"rolls": None, "entries": [OLD_ENTRY]}]},
+                               "data/test/loot_table/c.json": _table(dict(OLD_ENTRY, weight=None))})
+    passed, _ = _run(root, ["1.21"])
+    out = capsys.readouterr().out
+    assert not passed
+    assert "a.json" in out and "found a string" in out
+    assert "b.json" in out and "`rolls` is required" in out
+    assert "c.json" not in out   # a null optional field is simply absent

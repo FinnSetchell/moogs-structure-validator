@@ -529,7 +529,9 @@ class Reader:
                 self.check_id(value, spec, path, out)
             return
         if kind in ("int", "long", "short", "byte", "float", "double", "boolean"):
-            if isinstance(value, (dict, list)):
+            # The game's JSON reader takes a number or a boolean here, never a
+            # string ("count": "3" fails the whole file).
+            if isinstance(value, (dict, list, str)):
                 out.append(Finding(path, "shape", detail=f"a {kind} is read here, found {_kind_name(value)}"))
             return
         if kind == "literal":
@@ -609,6 +611,8 @@ class Reader:
         judge_keys = not flat.open and not flat.custom
         start = len(out)
         for k in value:
+            if value[k] is None:
+                continue  # the game reads a null member as absent
             child_path = _join(path, k)
             f = by_key.get(k)
             if f is not None:
@@ -644,7 +648,7 @@ class Reader:
             named = {c for f in out[start:] if f.code == "foreign-key" and f.path == _join(path, f.key)
                      for c in f.counterparts}
             for k, f in by_key.items():
-                if not f.optional and k not in value and k not in named:
+                if not f.optional and value.get(k) is None and k not in named:
                     out.append(Finding(path, "missing", key=k, detail=f"`{k}` is required"))
 
     def _classify_unknown(self, k, value, t, env, frames, flat_now: _Flat, judge_keys: bool,
@@ -707,7 +711,7 @@ class Reader:
                 candidates = at_edge
         counterparts = self._pair(k_field, candidates, env) if k_field is not None else candidates
         names = tuple(sorted(f.key for f in counterparts))
-        present = any(n in value for n in names)
+        present = any(value.get(n) is not None for n in names)
         out.append(Finding(path, "foreign-key", key=k, counterparts=names, counterpart_present=present,
                            known_window=known, on=_object_type(value), retired=bool(before)))
 
