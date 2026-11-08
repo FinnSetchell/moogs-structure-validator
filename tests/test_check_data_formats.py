@@ -799,3 +799,48 @@ def test_a_condition_type_without_a_namespace_reads_as_minecraft(tmp_path, stubb
     root = _project(tmp_path, {"data/test/loot_table/t.json": _table(entry)})
     passed, _ = _run(root, ["26.2", "26.3"])
     assert passed, capsys.readouterr().out
+
+
+
+# MFR's converter writes a list item modifier file as one sequence (26.3 reads one
+# function per file); this is its exact output for a two-step list.
+SEQUENCE_BOTH = {"function": "minecraft:sequence", "type": "minecraft:sequence", "functions": [
+    {"function": "minecraft:set_count", "type": "minecraft:set_count", "count": 2,
+     "conditions": [{"condition": "minecraft:random_chance", "chance": 0.5}],
+     "condition": {"type": "minecraft:random_chance", "chance": 0.5}},
+    {"function": "minecraft:enchant_randomly", "type": "minecraft:enchant_randomly"}]}
+STEPS_OLD = [{"function": "minecraft:set_count", "count": 2,
+              "conditions": [{"condition": "minecraft:random_chance", "chance": 0.5}]},
+             {"function": "minecraft:enchant_randomly"}]
+
+
+def test_a_list_item_modifier_written_as_one_sequence_passes_everywhere(tmp_path, stubbed, capsys):
+    root = _project(tmp_path, {"data/test/item_modifier/steps.json": SEQUENCE_BOTH})
+    passed, _ = _run(root, ["1.21", "26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+
+
+def test_a_list_item_modifier_is_refused_on_26_3(tmp_path, stubbed, capsys):
+    root = _project(tmp_path, {"data/test/item_modifier/steps.json": STEPS_OLD})
+    passed, summary = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed and "on 26.3" in summary, out
+    assert "found a list" in out
+
+
+def test_a_list_against_a_26_3_overlay_sequence_is_compared(tmp_path, stubbed, capsys):
+    # The base list is the sequence 1.21 to 26.2 run; the overlay's sequence lost a step.
+    good = {"type": "minecraft:sequence", "functions": [
+        {"type": "minecraft:set_count", "count": 2, "condition": {"type": "minecraft:random_chance", "chance": 0.5}},
+        {"type": "minecraft:enchant_randomly"}]}
+    root = _project(tmp_path, {"data/test/item_modifier/steps.json": STEPS_OLD,
+                               "ov_26_3/data/test/item_modifier/steps.json": good}, pack=OVERLAY_PACK)
+    passed, _ = _run(root, ["26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+    short = {"type": "minecraft:sequence", "functions": good["functions"][:1]}
+    root = _project(tmp_path / "short", {"data/test/item_modifier/steps.json": STEPS_OLD,
+                                         "ov_26_3/data/test/item_modifier/steps.json": short}, pack=OVERLAY_PACK)
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert "functions[1]" in out and "26.3 loses it" in out

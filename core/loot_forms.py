@@ -10,7 +10,9 @@ The two forms can sit side by side in one file, or in two files: a base file and
 a pack overlay that only one side loads. Either way, what the old side reads is
 compared with what 26.3 reads. Item modifier and predicate files carry both
 forms in one object (``function`` and ``type``, ``conditions`` and
-``condition``), so the whole object is compared.
+``condition``), so the whole object is compared. An item modifier file that is a
+list is the ``minecraft:sequence`` it stands for on 1.21 to 26.2; 26.3 reads one
+function per file, so the converter writes it as that sequence, in both forms.
 
 This builds the 26.3 form from the old one, the way MFR's ``scripts/loot_26_3.py``
 writes it (Moog's Structure Lib's renames plus ``functions`` -> ``modifier`` and
@@ -472,6 +474,9 @@ def disagreements(kind: str, old, new, conv: Converter) -> list[tuple[str, str, 
         if isinstance(old, dict) and isinstance(new, dict):
             _table(old, new, "", conv, out)
     elif kind == "item_modifier":
+        if isinstance(old, list) and isinstance(new, dict):
+            # 1.21 to 26.2 read a list file as a sequence (the converter writes it as one)
+            old = {"function": "minecraft:sequence", "functions": old}
         _each(old, new, conv, out, _function_pair, "function")
     elif kind == "predicate":
         if isinstance(old, dict) and isinstance(new, dict):
