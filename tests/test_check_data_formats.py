@@ -118,8 +118,9 @@ def test_new_loot_form_alone_fails_before_26_3(tmp_path, stubbed, capsys):
 def test_both_forms_side_by_side_pass_everywhere(tmp_path, stubbed, capsys):
     root = _project(tmp_path, {"data/test/loot_table/chest.json": _table(DUAL_ENTRY)})
     passed, summary = _run(root, ["1.21", "26.2", "26.3"])
-    assert passed, capsys.readouterr().out
-    assert "written in two version forms" in capsys.readouterr().out or passed
+    out = capsys.readouterr().out
+    assert passed, out
+    assert "written in two version forms" in out
 
 
 def test_half_converted_pool_conditions_fail_on_26_3(tmp_path, stubbed, capsys):
