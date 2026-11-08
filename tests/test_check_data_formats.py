@@ -407,13 +407,15 @@ def test_msl_reads_trial_spawner_configs_before_vanilla_does(tmp_path, stubbed, 
     assert "which reads data/<ns>/trial_spawner" in out
 
 
-def test_a_minimum_below_the_msl_that_reads_them_is_reported(tmp_path, stubbed, capsys):
+def test_a_minimum_below_the_msl_that_reads_them_fails(tmp_path, stubbed, capsys):
+    # With MSL older than 3.0.0 on 1.21.1 the configs are never read: broken in
+    # game with the MSL the mod allows, so it blocks.
     root = _msl_project(tmp_path, {"data/test/trial_spawner/arena.json": TRIAL}, fabric="*")
     passed, summary = _run(root, ["1.21.1"])
     out = capsys.readouterr().out
-    assert passed  # warnings only
+    assert not passed
+    assert "[ERROR] on 1.21.1 this mod allows MSL 1.0.0" in out
     assert "Raise the moogs_structures minimum to 3.0.0" in out
-    assert "nothing reads this file" in out
 
 
 def test_allowlisted_key_passes_and_the_same_key_elsewhere_does_not(tmp_path, stubbed, capsys):

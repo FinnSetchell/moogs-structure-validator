@@ -312,7 +312,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                       f"{msl_upgrade.fmt(builds.effective(ok[0], msl_min))} or newer, which {what}")
             if msl_short.get(name):
                 short = sorted(msl_short[name], key=order.index)
-                print(f"  [WARN] on {_ranges(short, order)} this mod allows MSL "
+                print(f"  [ERROR] on {_ranges(short, order)} this mod allows MSL "
                       f"{msl_upgrade.fmt(builds.effective(short[0], msl_min))}, older than {feat['msl_from']}, "
                       f"the first that {what}, so the files are read without it there. Raise the "
                       f"moogs_structures minimum to {feat['msl_from']} to rely on it.")
@@ -385,7 +385,9 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         print(f"  {gaps_applied} finding(s) explained by known model gaps (data/format_model/model.json)")
     if allowed_hits:
         print(f"  {len(allowed_hits)} key(s) no version reads let through as harmless (data/allowed_keys.json)")
-    warns += len(msl_short_warns)
+    errors += len(msl_short_warns)
+    for name in msl_short_warns:
+        error_versions.update(msl_short[name])
 
     failed = errors > 0 or bool(unverified) or bool(problems) or bool(unknown)
     parts = [f"{total_files} files x {len(checkable)} versions"]
