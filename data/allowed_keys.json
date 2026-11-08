@@ -5,6 +5,7 @@
       "kind": "loot_table",
       "on": "minecraft:enchant_with_levels",
       "key": "only_compatible",
+      "value": true,
       "reason": "enchant_with_levels has never read `only_compatible` and only ever picks enchantments that fit the item, which is what `\"only_compatible\": true` asks for (MBS 1.20 base_loot_towers.json)"
     }
   ]

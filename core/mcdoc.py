@@ -204,6 +204,9 @@ class Finding:
     # foreign-key: the key's window ended at or before this version (removed or
     # moved), rather than starting after it.
     retired: bool = False
+    # unknown-key: the key's value, when it is a plain value (for the allowlist)
+    value: object = None
+    has_value: bool = False
 
 
 _INDEX = re.compile(r"\[\d+\]")
@@ -677,8 +680,10 @@ class Reader:
                     break
         if not windows:
             if judge_keys and not every.open:
+                v = value.get(k)
+                plain = not isinstance(v, (dict, list))
                 out.append(Finding(path, "unknown-key", key=k, detail=f"no version reads `{k}` here",
-                                   on=_object_type(value)))
+                                   on=_object_type(value), value=v if plain else None, has_value=plain))
             return
         if flat_now.custom:
             return

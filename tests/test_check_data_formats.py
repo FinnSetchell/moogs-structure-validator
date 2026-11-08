@@ -566,3 +566,12 @@ def test_a_string_where_a_number_is_read_and_a_null_required_field_fail(tmp_path
     assert "a.json" in out and "found a string" in out
     assert "b.json" in out and "`rolls` is required" in out
     assert "c.json" not in out   # a null optional field is simply absent
+
+
+def test_allowlist_matches_the_value(tmp_path, stubbed, capsys):
+    false_one = {"type": "minecraft:item", "name": "minecraft:book",
+                 "functions": [{"function": "minecraft:enchant_with_levels", "levels": 5, "only_compatible": False}]}
+    root = _project(tmp_path, {"data/test/loot_table/a.json": _table(false_one)})
+    passed, _ = _run(root, ["1.21"])
+    assert not passed
+    assert "`only_compatible` is read by no version" in capsys.readouterr().out

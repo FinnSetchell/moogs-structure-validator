@@ -425,6 +425,7 @@ def _allowed_keys() -> list[dict]:
 
 def _is_allowed(allowed: list[dict], kind: str, f: Finding) -> bool:
     return any(a.get("kind") == kind and a.get("key") == f.key and a.get("on") in (None, f.on)
+               and ("value" not in a or (f.has_value and a["value"] == f.value))
                for a in allowed)
 
 
