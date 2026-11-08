@@ -19,6 +19,7 @@ pool or entry carries both. The comparison reads both sides the way 26.3 does:
 """
 from __future__ import annotations
 
+import json
 from typing import Iterable
 
 LOOT_RENAME = (26, 3)   # the first version that reads `modifier` / `condition` instead
@@ -42,6 +43,14 @@ _MAP_TAGS_RENAMED = {
     "minecraft:on_trial_chambers_maps": "minecraft:on_buried_trial_chambers_maps",
     "minecraft:on_woodland_explorer_maps": "minecraft:on_woodland_mansion_maps",
 }
+
+
+class _Absent:
+    def __repr__(self):
+        return "(absent)"
+
+
+ABSENT = _Absent()
 
 
 def _short(type_id):
@@ -258,34 +267,76 @@ def _norm(v, key):
     return v
 
 
-def _first_difference(a, b, path: str) -> tuple[str, object, object] | None:
+def _kind_of(v):
+    """A function's or condition's type id, or a reference's name."""
+    if isinstance(v, dict) and isinstance(v.get("type"), str):
+        return v["type"]
+    if isinstance(v, str):
+        return v
+    return None
+
+
+def _first_difference(a, b, path: str):
+    """``(path, want, have, how)``: ``how`` is ``order`` (same items, another order),
+    ``type`` (another function or condition there), or ``value``."""
     if isinstance(a, dict) and isinstance(b, dict):
+        ta, tb = a.get("type"), b.get("type")
+        if isinstance(ta, str) and isinstance(tb, str) and ta != tb:
+            return path, ta, tb, "type"
         for k in sorted(set(a) | set(b)):
             sub = f"{path}.{k}" if path else k
             if k not in a or k not in b:
-                return sub, a.get(k, "(absent)"), b.get(k, "(absent)")
+                return sub, a.get(k, ABSENT), b.get(k, ABSENT), "value"
             d = _first_difference(a[k], b[k], sub)
             if d:
                 return d
         return None
     if isinstance(a, list) and isinstance(b, list):
+        if len(a) == len(b) and a != b and sorted(map(_key, a)) == sorted(map(_key, b)):
+            return path, a, b, "order"
         for i, (x, y) in enumerate(zip(a, b)):
             d = _first_difference(x, y, f"{path}[{i}]")
             if d:
                 return d
         if len(a) != len(b):
-            return f"{path}[{min(len(a), len(b))}]", (a[len(b)] if len(a) > len(b) else "(absent)"), \
-                (b[len(a)] if len(b) > len(a) else "(absent)")
+            n = min(len(a), len(b))
+            return f"{path}[{n}]", (a[n] if len(a) > n else ABSENT), (b[n] if len(b) > n else ABSENT), "value"
         return None
     if a != b:
-        return path, a, b
+        return path, a, b, "value"
     return None
 
 
+def _key(v) -> str:
+    return json.dumps(v, sort_keys=True)
+
+
 def _short_json(v, limit: int = 70) -> str:
-    import json
-    s = v if isinstance(v, str) and v in ("(absent)",) else json.dumps(v, separators=(",", ":"))
+    s = json.dumps(v, separators=(",", ":"))
     return s if len(s) <= limit else s[:limit - 3] + "..."
+
+
+def _explain(want, have, root: str, old_label: str) -> tuple[str, str]:
+    """``(path, message)`` for normalised ``want`` (built from the old form) and
+    ``have`` (what 26.3 reads)."""
+    d = _first_difference(want, have, root)
+    where, w, h, how = d if d else (root, want, have, "value")
+    if how == "order":
+        names = lambda xs: ", ".join(str(_kind_of(x) or _short_json(x, 40)) for x in xs)
+        noun = ("items" if not all(_kind_of(x) for x in h) else
+                "conditions" if "condition" in old_label else "functions")
+        return where, (f"26.3 reads the same {len(h)} {noun} in another order ({names(h)}); the old form's "
+                       f"{old_label} runs {names(w)}. They run in order, so the two forms disagree")
+    if how == "type":
+        return where, (f"26.3 reads a {h} here, where the old form's {old_label} has a {w}: "
+                       f"the two forms disagree")
+    if h is ABSENT:
+        return where, f"26.3 reads nothing here; the old form's {old_label} gives {_short_json(w)}: 26.3 loses it"
+    if w is ABSENT:
+        return where, (f"26.3 reads {_short_json(h)} here, which the old form's {old_label} does not have: "
+                       f"1.21 to 26.2 lose it")
+    return where, (f"26.3 reads {_short_json(h)} here, but the old form's {old_label} gives {_short_json(w)}: "
+                   f"the two forms disagree")
 
 
 # --- the comparison ---------------------------------------------------------------------
@@ -347,7 +398,5 @@ def _compare(new_key: str, old_key: str, expected, actual, join, out) -> None:
         out.append((join(new_key), f"26.3 reads `{new_key}`, which is empty; the old form's `{old_key}` "
                                    f"gives {_short_json(expected)}: 26.3 loses it"))
         return
-    d = _first_difference(a, b, new_key)
-    where, want, have = d if d else (new_key, a, b)
-    out.append((join(where), f"26.3 reads {_short_json(have)} here, but the old form's `{old_key}` "
-                             f"gives {_short_json(want)}: the two forms disagree"))
+    where, msg = _explain(a, b, new_key, f"`{old_key}`")
+    out.append((join(where), msg))

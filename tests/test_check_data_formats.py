@@ -610,3 +610,25 @@ def test_inline_table_in_set_contents_as_the_converter_writes_it_passes(tmp_path
     root = _project(tmp_path, {"data/test/loot_table/box.json": _table(box)})
     passed, _ = _run(root, ["26.2", "26.3"])
     assert passed, capsys.readouterr().out
+
+
+def test_functions_in_another_order_say_what_differs(tmp_path, stubbed, capsys):
+    entry = _dual([SET3, ENCH], [{"type": "minecraft:enchant_randomly"}, {"type": "minecraft:set_count", "count": 3}])
+    root = _project(tmp_path, {"data/test/loot_table/a.json": _table(entry)})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed
+    assert ("26.3 reads the same 2 functions in another order (minecraft:enchant_randomly, minecraft:set_count); "
+            "the old form's `functions` runs minecraft:set_count, minecraft:enchant_randomly") in out
+    assert "(absent)" not in out
+
+
+def test_another_function_in_one_place_is_named(tmp_path, stubbed, capsys):
+    entry = _dual([SET3], [{"type": "minecraft:enchant_randomly"}])
+    root = _project(tmp_path, {"data/test/loot_table/a.json": _table(entry)})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed
+    assert ("26.3 reads a minecraft:enchant_randomly here, where the old form's `functions` has a "
+            "minecraft:set_count") in out
+    assert "pools[0].entries[0].modifier[0]" in out
