@@ -24,12 +24,14 @@ _W = 70
 
 # Run order. The first column is the name used with --check / --skip-check.
 CHECK_NAMES = [
+    "check_claimed_versions",
     "check_directory_names",
     "nbt_check",
     "check_data_integrity",
     "check_version_coverage",
     "check_loot_tables",
     "check_loot_table_schemas",
+    "check_data_formats",
     "check_registries",
     "check_worldgen_schemas",
     "check_entity_nbt",
@@ -218,6 +220,9 @@ def main() -> None:
                         help="run only the named check (may be repeated)")
     parser.add_argument("--skip-check", action="append", default=[], metavar="NAME",
                         help="skip the named check (may be repeated)")
+    parser.add_argument("--claim", action="append", default=[], metavar="START-END",
+                        help="a version window the mod is published for (may be repeated); "
+                             "checked by check_claimed_versions and check_data_formats")
     parser.add_argument("--json", dest="json_out", nargs="?", const="-", default=None, metavar="PATH",
                         help="emit machine-readable JSON report (path or - for stdout)")
     args = parser.parse_args()
@@ -236,6 +241,7 @@ def main() -> None:
         project_root=Path(str(args.project_root).strip('"')),
         refresh=args.refresh,
         overlay=cfg.get("overlay", False),
+        claims=list(args.claim),
     )
     ctx.extra_ids = resolve_extra_ids(ctx.extra_ids_raw, ctx.project_root)
 

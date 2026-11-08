@@ -1,0 +1,151 @@
+{
+  "source": "https://api.spyglassmc.com/vanilla-mcdoc/symbols",
+  "mcdoc_ref": "1a674539af7150444db0e2fa8fc46318f91ed86b",
+  "checked": "2026-11-08",
+  "verified": {
+    "1.20": {
+      "files": 4877,
+      "kinds": 38
+    },
+    "1.20.1": {
+      "files": 4877,
+      "kinds": 38
+    },
+    "1.20.2": {
+      "files": 4884,
+      "kinds": 38
+    },
+    "1.20.3": {
+      "files": 4956,
+      "kinds": 38
+    },
+    "1.20.4": {
+      "files": 4956,
+      "kinds": 38
+    },
+    "1.20.5": {
+      "files": 5104,
+      "kinds": 41
+    },
+    "1.20.6": {
+      "files": 5104,
+      "kinds": 41
+    },
+    "1.21": {
+      "files": 5552,
+      "kinds": 45
+    },
+    "1.21.1": {
+      "files": 5552,
+      "kinds": 45
+    },
+    "1.21.2": {
+      "files": 5771,
+      "kinds": 47
+    },
+    "1.21.3": {
+      "files": 5771,
+      "kinds": 47
+    },
+    "1.21.4": {
+      "files": 5860,
+      "kinds": 47
+    },
+    "1.21.5": {
+      "files": 5962,
+      "kinds": 54
+    },
+    "1.21.6": {
+      "files": 6048,
+      "kinds": 56
+    },
+    "1.21.7": {
+      "files": 6050,
+      "kinds": 56
+    },
+    "1.21.8": {
+      "files": 6050,
+      "kinds": 56
+    },
+    "1.21.9": {
+      "files": 6255,
+      "kinds": 56
+    },
+    "1.21.10": {
+      "files": 6255,
+      "kinds": 56
+    },
+    "1.21.11": {
+      "files": 6299,
+      "kinds": 59
+    },
+    "26.1": {
+      "files": 6977,
+      "kinds": 69
+    },
+    "26.1.1": {
+      "files": 6977,
+      "kinds": 69
+    },
+    "26.1.2": {
+      "files": 6977,
+      "kinds": 69
+    },
+    "26.2": {
+      "files": 7210,
+      "kinds": 70
+    },
+    "26.3": {
+      "files": 8269,
+      "kinds": 78
+    }
+  },
+  "gaps": [
+    {
+      "scope": "model",
+      "kind": "recipe",
+      "code": "unknown-key",
+      "key": "category",
+      "reason": "vanilla-mcdoc leaves `category` off the special crafting recipes (armor_dye, map_cloning, ...); the game reads it on them"
+    },
+    {
+      "scope": "model",
+      "kind": "wolf_sound_variant",
+      "code": "unknown-key",
+      "key": "step_sound",
+      "reason": "vanilla-mcdoc has no `step_sound` on wolf sound variants; vanilla 26.1 and later ships it on every one"
+    },
+    {
+      "scope": "model",
+      "kind": "recipe",
+      "code": "missing",
+      "key": "id",
+      "path_suffix": "result",
+      "versions": [
+        "26.3"
+      ],
+      "reason": "vanilla-mcdoc requires `result.id` on the 26.3 map_extending recipe, whose result vanilla writes without one"
+    },
+    {
+      "scope": "vanilla",
+      "kind": "worldgen/template_pool",
+      "code": "unknown-id",
+      "detail_contains": "minecraft:ancient_city/walls/intact_horizontal_wall_stairs_5",
+      "reason": "vanilla's ancient city wall pool names a structure file vanilla does not ship (a bug in vanilla itself)"
+    }
+  ],
+  "patches": [
+    {
+      "type": "::java::data::loot::function::EnchantRandomly",
+      "key": "options",
+      "since": "1.21",
+      "reason": "enchant_randomly reads `options` from 1.21, where it replaced `enchantments`; vanilla 1.20.6 still writes `enchantments` and 1.21 is the first release to write `options`. vanilla-mcdoc gives `options` no start version"
+    },
+    {
+      "type": "::java::data::loot::function::EnchantRandomly",
+      "key": "only_compatible",
+      "since": "1.21",
+      "reason": "`only_compatible` arrived with the 1.21 enchantment rework: the string is in no client jar before 1.21 and in every one from 1.21. vanilla-mcdoc gives it no start version"
+    }
+  ]
+}

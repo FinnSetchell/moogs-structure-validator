@@ -212,6 +212,18 @@ class Mcmeta:
             self._index = VersionIndex(fetch_version_entries(self.cache_dir, self.refresh))
         return self._index
 
+    def versions_knowing(self, names) -> VersionIndex:
+        """The version index, refetched once when it does not know one of
+        ``names`` -- a release newer than the cached copy. A failed refetch
+        keeps the cached index."""
+        idx = self.versions
+        if any(n not in idx.data_version for n in names) and not getattr(self, "_index_refetched", False):
+            self._index_refetched = True
+            fresh = VersionIndex(fetch_version_entries(self.cache_dir, True))
+            if fresh:
+                self._index = idx = fresh
+        return idx
+
     def version_added(self, registry_key: str, id_: str, after: str) -> str | None:
         """The first stable release newer than ``after`` whose ``registry_key``
         holds ``id_``; None if no probed release has it.

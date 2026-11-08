@@ -125,9 +125,14 @@ class VersionIndex:
 
     def __init__(self, entries: list[dict]):
         self.data_version: dict[str, int] = {}
+        # Data pack format as (major, minor); minor is 0 before 1.21.9.
+        self.pack_format: dict[str, tuple[int, int]] = {}
         for e in entries:
             if e.get("stable") and isinstance(e.get("id"), str) and isinstance(e.get("data_version"), int):
                 self.data_version[e["id"]] = e["data_version"]
+                if isinstance(e.get("data_pack_version"), int):
+                    minor = e.get("data_pack_version_minor")
+                    self.pack_format[e["id"]] = (e["data_pack_version"], minor if isinstance(minor, int) else 0)
         # Oldest first; ties impossible for distinct ids.
         self.stable_ascending: list[str] = sorted(
             (v for v in self.data_version if try_parse_version(v) is not None),
@@ -160,3 +165,15 @@ class VersionIndex:
         if floor is None:
             return list(self.stable_ascending)
         return [v for v in self.stable_ascending if parse_version(v) > floor]
+
+    def stable_between(self, low: str, high: str) -> list[str]:
+        """Stable releases from ``low`` to ``high`` inclusive, oldest first."""
+        lo, hi = try_parse_version(low), try_parse_version(high)
+        if lo is None or hi is None:
+            return []
+        return [v for v in self.stable_ascending if lo <= parse_version(v) <= hi]
+
+    def with_pack_formats(self, low: tuple[int, int], high: tuple[int, int]) -> list[str]:
+        """Stable releases whose data pack format lies in ``[low, high]``, oldest first."""
+        return [v for v in self.stable_ascending
+                if v in self.pack_format and low <= self.pack_format[v] <= high]

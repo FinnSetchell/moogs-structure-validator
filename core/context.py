@@ -33,6 +33,8 @@ class ValidatorContext:
     # An overlay pack extends another mod instead of standing alone (a compat or
     # overlay pack). See Project.overlay.
     overlay: bool = False
+    # Version windows named with --claim (the release pipeline's publish window).
+    claims: list[str] = field(default_factory=list)
 
 
 class FileRange:

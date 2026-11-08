@@ -1,0 +1,343 @@
+"""check_data_formats and check_claimed_versions: data read the way each version reads it.
+
+The fixtures are tiny packs read with the pinned vanilla-mcdoc model in
+data/format_model, so a model bump that changes how 26.2 or 26.3 read a loot
+table shows up here. Registries are stubbed per version; a registry the stub
+does not list is not judged.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from checks import check_claimed_versions, check_data_formats
+from core import msl_upgrade
+from core.claims import format_range, manifest_targets, parse_claim
+from core.formats import load_model, version_reader
+from tests.nbt_helpers import FakeContext
+
+# Stable releases as mcmeta reports them, with data pack formats.
+VERSIONS = [
+    ("1.20.6", 3839, 41, 0), ("1.21", 3953, 48, 0), ("1.21.1", 3955, 48, 0),
+    ("26.2", 4903, 107, 1), ("26.3", 5023, 121, 0), ("26.4", 5130, 130, 0),
+]
+
+REGISTRIES = {
+    "loot_function_type": ["set_count", "enchant_randomly", "enchant_with_levels"],
+    "loot_condition_type": ["random_chance", "survives_explosion"],
+    "item": ["diamond", "book", "iron_ingot", "stone"],
+    "block": ["stone", "water", "iron_chain"],
+    "worldgen/biome": ["plains", "desert"],
+    "tag/worldgen/biome": ["is_overworld"],
+}
+
+
+@pytest.fixture
+def stubbed(monkeypatch):
+    from core import mcmeta
+
+    def fake_registry_data(version, cache_dir, refresh):
+        return {k: list(v) for k, v in REGISTRIES.items()}
+
+    def fake_version_entries(cache_dir, refresh):
+        return [{"id": v, "name": v, "type": "release", "stable": True, "data_version": dv,
+                 "data_pack_version": f, "data_pack_version_minor": m}
+                for v, dv, f, m in sorted(VERSIONS, key=lambda x: -x[1])]
+
+    monkeypatch.setattr(mcmeta, "fetch_registry_data", fake_registry_data)
+    monkeypatch.setattr(mcmeta, "fetch_version_entries", fake_version_entries)
+    monkeypatch.delenv("GITHUB_HEAD_REF", raising=False)
+    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
+
+
+def _write(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _project(tmp_path: Path, files: dict[str, object], *, msl: bool = False, pack: dict | None = None) -> Path:
+    res = tmp_path / "src" / "main" / "resources"
+    for rel, data in files.items():
+        _write(res / rel, data)
+    if msl:
+        _write(res / "fabric.mod.json", {"id": "test", "depends": {"moogs_structures": ">=3.0.0"}})
+    if pack is not None:
+        _write(res / "pack.mcmeta", pack)
+    (res / "data" / "test").mkdir(parents=True, exist_ok=True)
+    return tmp_path
+
+
+def _run(root: Path, versions: list[str], claims: list[str] | None = None, check=check_data_formats):
+    ctx = FakeContext("test", versions, root)
+    ctx.claims = claims or []
+    return check.run(ctx)
+
+
+# --- loot tables in old, new and both forms ----------------------------------------
+
+OLD_ENTRY = {"type": "minecraft:item", "name": "minecraft:diamond",
+             "functions": [{"function": "minecraft:set_count", "count": 3}]}
+NEW_ENTRY = {"type": "minecraft:item", "name": "minecraft:diamond",
+             "modifier": {"type": "minecraft:set_count", "count": 3}}
+DUAL_ENTRY = {"type": "minecraft:item", "name": "minecraft:diamond",
+              "functions": [{"function": "minecraft:set_count", "count": 3}],
+              "modifier": [{"type": "minecraft:set_count", "count": 3}]}
+
+
+def _table(entry, **pool):
+    return {"type": "minecraft:chest", "pools": [{"rolls": 1, "entries": [entry], **pool}]}
+
+
+def test_old_loot_form_fails_on_26_3_only(tmp_path, stubbed, capsys):
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": _table(OLD_ENTRY)})
+    passed, summary = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed
+    assert "on 26.3" in summary and "26.2" not in summary.split("error(s) on ")[1]
+    assert "`functions` is ignored" in out and "reads `modifier` instead" in out
+
+
+def test_old_loot_form_passes_on_the_versions_that_read_it(tmp_path, stubbed):
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": _table(OLD_ENTRY)})
+    passed, _ = _run(root, ["1.21", "1.21.1", "26.2"])
+    assert passed
+
+
+def test_new_loot_form_alone_fails_before_26_3(tmp_path, stubbed, capsys):
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": _table(NEW_ENTRY)})
+    passed, summary = _run(root, ["26.2", "26.3"])
+    assert not passed
+    assert "on 26.2" in summary
+    assert "`modifier` is ignored" in capsys.readouterr().out
+
+
+def test_both_forms_side_by_side_pass_everywhere(tmp_path, stubbed, capsys):
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": _table(DUAL_ENTRY)})
+    passed, summary = _run(root, ["1.21", "26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+    assert "written in two version forms" in capsys.readouterr().out or passed
+
+
+def test_half_converted_pool_conditions_fail_on_26_3(tmp_path, stubbed, capsys):
+    # functions done, pool conditions forgotten: 26.3 drops the condition and
+    # the pool rolls every time.
+    table = _table(DUAL_ENTRY, conditions=[{"condition": "minecraft:random_chance", "chance": 0.5}])
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": table})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed
+    assert "`conditions` is ignored" in out and "reads `condition` instead" in out
+
+
+def test_msl_rewrite_rescues_conditions_but_not_functions(tmp_path, stubbed, capsys):
+    # With Moog's Structure Lib, 26.3 reads the file after MSL's rewrite:
+    # conditions and function ids are upgraded, the functions list is not.
+    table = _table(OLD_ENTRY, conditions=[{"condition": "minecraft:random_chance", "chance": 0.5}])
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": table}, msl=True)
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed
+    assert "`functions` is ignored" in out
+    assert "`conditions` is ignored" not in out
+    assert "Moog's Structure Lib rewrites" in out
+
+
+def test_msl_rewrite_alone_is_a_warning(tmp_path, stubbed, capsys):
+    table = {"type": "minecraft:chest", "pools": [{"rolls": {"min": 1, "max": 3}, "entries": [DUAL_ENTRY]}]}
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": table}, msl=True)
+    passed, summary = _run(root, ["26.2", "26.3"])
+    assert passed
+    assert "warning" in summary
+
+
+def test_typo_key_fails_and_comment_key_does_not(tmp_path, stubbed, capsys):
+    typo = {"type": "minecraft:item", "name": "minecraft:diamond", "weigth": 3}
+    note = {"type": "minecraft:item", "name": "minecraft:diamond", "_comment": "rare"}
+    root = _project(tmp_path, {"data/test/loot_table/a.json": _table(typo),
+                               "data/test/loot_table/b.json": _table(note)})
+    passed, _ = _run(root, ["1.21"])
+    out = capsys.readouterr().out
+    assert not passed
+    assert "`weigth` is read by no version" in out
+    assert "_comment" not in out
+
+
+def test_unknown_item_on_a_version_rejects_the_file(tmp_path, stubbed, capsys):
+    entry = {"type": "minecraft:item", "name": "minecraft:mace"}
+    root = _project(tmp_path, {"data/test/loot_table/a.json": _table(entry)})
+    passed, _ = _run(root, ["1.21"])
+    assert not passed
+    assert "`minecraft:mace` is not a item on this version" in capsys.readouterr().out
+
+
+def test_unnamespaced_ids_are_read_as_minecraft(tmp_path, stubbed):
+    entry = {"type": "item", "name": "diamond", "functions": [{"function": "set_count", "count": 2}]}
+    root = _project(tmp_path, {"data/test/loot_table/a.json": _table(entry)})
+    passed, _ = _run(root, ["1.21"])
+    assert passed
+
+
+# --- which files a version loads -----------------------------------------------------
+
+def test_overlay_for_26_3_replaces_the_base_file(tmp_path, stubbed, capsys):
+    pack = {"pack": {"pack_format": 48, "supported_formats": [48, 121], "min_format": 48, "max_format": 121},
+            "overlays": {"entries": [{"formats": [121, 121], "min_format": 121, "max_format": 121,
+                                      "directory": "ov_26_3"}]}}
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": _table(OLD_ENTRY),
+                               "ov_26_3/data/test/loot_table/chest.json": _table(NEW_ENTRY)}, pack=pack)
+    passed, _ = _run(root, ["1.21", "26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+
+
+def test_plural_folder_is_not_loaded_from_1_21(tmp_path, stubbed, capsys):
+    root = _project(tmp_path, {"data/test/loot_tables/chest.json": _table(OLD_ENTRY)})
+    passed, _ = _run(root, ["1.20.6", "1.21"])
+    out = capsys.readouterr().out
+    assert not passed
+    assert "on 1.21" in out and "does not load `loot_tables/`" in out
+
+
+def test_tag_entry_missing_on_a_version_fails_unless_optional(tmp_path, stubbed, capsys):
+    root = _project(tmp_path, {
+        "data/test/tags/worldgen/biome/bad.json": {"values": ["minecraft:plains", "minecraft:pale_garden"]},
+        "data/test/tags/worldgen/biome/ok.json": {"values": ["minecraft:plains", "#minecraft:is_overworld",
+                                                             {"id": "minecraft:pale_garden", "required": False}]},
+    })
+    passed, _ = _run(root, ["1.21"])
+    out = capsys.readouterr().out
+    assert not passed
+    assert "bad.json" in out and "ok.json" not in out
+
+
+# --- versions -----------------------------------------------------------------------------
+
+def test_a_version_the_model_was_never_proven_against_fails(tmp_path, stubbed, capsys):
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": _table(DUAL_ENTRY)})
+    passed, summary = _run(root, ["26.3"], claims=["26.3-26.4"])
+    assert not passed
+    assert "never proven" in summary
+    assert "26.4: the format model has not been proven" in capsys.readouterr().out
+
+
+MANIFEST = """\
+schema: 1
+mod:
+  id: test
+discord:
+  embedColor: "#0f2b52"   # a colour, not a comment
+targets:
+  - branch: 1.20-datapack
+    mc: { start: "1.20", end: "1.20.6" }
+  - branch: 1.21-datapack
+    mc:
+      start: "1.21"
+      end: "26.3"   # fleet standard
+"""
+
+
+def test_publish_manifest_claim_beyond_validator_json_fails(tmp_path, stubbed, capsys):
+    root = _project(tmp_path, {})
+    (root / ".github").mkdir()
+    (root / ".github" / "moogs-publish.yml").write_text(MANIFEST, encoding="utf-8")
+    passed, summary = _run(root, ["1.21", "1.21.1", "26.2"], check=check_claimed_versions)
+    out = capsys.readouterr().out
+    assert not passed
+    assert "claimed but never checked: 26.3" in out
+
+
+def test_claims_covered_by_validator_json_pass(tmp_path, stubbed):
+    pack = {"pack": {"pack_format": 48, "supported_formats": [48, 121]}}
+    root = _project(tmp_path, {}, pack=pack)
+    passed, _ = _run(root, ["1.21", "1.21.1", "26.2", "26.3"], check=check_claimed_versions)
+    assert passed
+
+
+def test_pack_mcmeta_range_and_cli_claim_are_read(tmp_path, stubbed, capsys):
+    pack = {"pack": {"pack_format": 48, "supported_formats": [48, 121]}}
+    root = _project(tmp_path, {}, pack=pack)
+    passed, _ = _run(root, ["1.21", "1.21.1"], claims=["1.21-26.2"], check=check_claimed_versions)
+    out = capsys.readouterr().out
+    assert not passed
+    assert "pack.mcmeta: 1.21-26.3" in out and "--claim: 1.21-26.2" in out
+
+
+def test_manifest_reader_handles_flow_and_block_styles():
+    targets = manifest_targets(MANIFEST)
+    assert {"branch": "1.20-datapack", "start": "1.20", "end": "1.20.6"} in targets
+    assert {"branch": "1.21-datapack", "start": "1.21", "end": "26.3"} in targets
+
+
+def test_format_ranges():
+    assert format_range({"supported_formats": [48, 121]}, new_fields=False) == ((48, 0), (121, 99))
+    assert format_range({"min_format": 48, "max_format": 121.0}, new_fields=True) == ((48, 0), (121, 99))
+    assert format_range({"min_format": [107, 1], "max_format": [107, 1]}, new_fields=True) == ((107, 1), (107, 1))
+    assert parse_claim("1.21-26.3") == ("1.21", "26.3") and parse_claim("26.3") == ("26.3", "26.3")
+    assert parse_claim("next") is None
+
+
+# --- MSL's rewrite and the reader ------------------------------------------------------
+
+def test_msl_rewrite_matches_moogs_structure_lib():
+    table = {"pools": [{"rolls": {"min": 1, "max": 2},
+                        "conditions": [{"condition": "minecraft:random_chance", "chance": 0.5},
+                                       {"condition": "minecraft:survives_explosion"}],
+                        "entries": [{"type": "minecraft:item", "name": "minecraft:stone",
+                                     "functions": [{"function": "minecraft:set_count", "count": 2,
+                                                    "conditions": [{"condition": "minecraft:random_chance",
+                                                                    "chance": 0.1}]}]}]}]}
+    out, n = msl_upgrade.upgrade("loot_table", table)
+    pool = out["pools"][0]
+    assert pool["rolls"]["type"] == "minecraft:uniform"
+    assert pool["condition"]["type"] == "minecraft:all_of"
+    assert [t["type"] for t in pool["condition"]["terms"]] == ["minecraft:random_chance", "minecraft:survives_explosion"]
+    fn = pool["entries"][0]["functions"][0]           # the list key itself is left alone, as in MSL
+    assert fn["type"] == "minecraft:set_count" and fn["condition"]["type"] == "minecraft:random_chance"
+    assert "conditions" in table["pools"][0]           # the input is not touched
+    # pool conditions, its two condition ids, the range, the function id, the
+    # function's conditions and its condition id: MSL counts each rewrite
+    assert n == 7
+
+    proc = {"processors": [{"rules": [{"output_state": {"Name": "minecraft:chain", "Properties": {"axis": "y"}}}]}]}
+    out, n = msl_upgrade.upgrade("worldgen/processor_list", proc, {"minecraft:iron_chain"})
+    assert out["processors"][0]["rules"][0]["output_state"] == {"id": "minecraft:iron_chain",
+                                                                "properties": {"axis": "y"}}
+
+
+def test_block_state_written_in_both_forms_passes_on_26_2_and_26_3():
+    model = load_model()
+    rule = {"input_predicate": {"predicate_type": "minecraft:always_true"},
+            "location_predicate": {"predicate_type": "minecraft:always_true"}}
+    rt = {"kind": "reference", "path": "::java::data::worldgen::processor_list::ProcessorList"}
+    for state, ok_on in (({"Name": "minecraft:stone"}, {"26.2"}),
+                         ({"id": "minecraft:stone"}, {"26.3"}),
+                         ({"Name": "minecraft:stone", "id": "minecraft:stone"}, {"26.2", "26.3"})):
+        data = {"processors": [{"processor_type": "minecraft:rule",
+                                "rules": [dict(rule, output_state=state)]}]}
+        for v in ("26.2", "26.3"):
+            findings = version_reader(model, v, REGISTRIES, set()).read(data, rt)
+            bad = [f for f in findings if f.code != "foreign-key" or not f.counterpart_present]
+            assert (not bad) == (v in ok_on), (state, v, bad)
+
+
+def test_a_stale_version_index_is_refetched_before_claims_are_read(tmp_path, monkeypatch, capsys):
+    # The cached index stops at 26.2; the manifest claims 26.3. The claim must
+    # not shrink to 26.2: the index is refetched, and 26.3 is then checked.
+    from core import mcmeta
+    calls = []
+
+    def entries(cache_dir, refresh):
+        calls.append(refresh)
+        known = VERSIONS if refresh else [v for v in VERSIONS if v[0] not in ("26.3", "26.4")]
+        return [{"id": v, "name": v, "type": "release", "stable": True, "data_version": dv,
+                 "data_pack_version": f, "data_pack_version_minor": m} for v, dv, f, m in known]
+
+    monkeypatch.setattr(mcmeta, "fetch_registry_data", lambda v, c, r: dict(REGISTRIES))
+    monkeypatch.setattr(mcmeta, "fetch_version_entries", entries)
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": _table(OLD_ENTRY)})
+    (root / ".github").mkdir()
+    (root / ".github" / "moogs-publish.yml").write_text(MANIFEST, encoding="utf-8")
+    passed, summary = _run(root, ["1.21", "1.21.1", "26.2"])
+    assert True in calls
+    assert not passed and "on 26.3" in summary
