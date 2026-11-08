@@ -352,7 +352,7 @@ def _norm_condition(c):
     if isinstance(c, list):
         c = {"type": "minecraft:all_of", "terms": c} if len(c) != 1 else c[0]
     if isinstance(c, dict):
-        out = {k: _norm(v, k) for k, v in c.items()}
+        out = _norm(c, None)
         if out.get("type") == "minecraft:all_of" and isinstance(out.get("terms"), list) and len(out["terms"]) == 1:
             return out["terms"][0]
         return out

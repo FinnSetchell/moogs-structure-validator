@@ -791,3 +791,11 @@ def test_rule_map_destinations_become_tags(tmp_path, stubbed, monkeypatch, capsy
     assert passed, capsys.readouterr().out
     bare = {"type": "minecraft:exploration_map", "destination": "minecraft:on_treasure_maps"}
     _fails_at(tmp_path / "bare", _table(_dual(old, bare)), "modifier[0].destination", capsys)
+
+
+def test_a_condition_type_without_a_namespace_reads_as_minecraft(tmp_path, stubbed, capsys):
+    entry = dict(DUAL_ENTRY, conditions=[{"condition": "random_chance", "chance": 0.5}],
+                 condition={"type": "random_chance", "chance": 0.5})
+    root = _project(tmp_path, {"data/test/loot_table/t.json": _table(entry)})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    assert passed, capsys.readouterr().out
