@@ -60,6 +60,67 @@ _MAP_TAGS_RENAMED = {
 }
 
 DISAGREE = "forms-disagree"   # the two forms say different things: ERROR
+BLANK_MAP = "blank-map"       # a 26.3 exploration_map on a plain minecraft:map: ERROR
+
+# 26.3: exploration_map writes the map data onto whatever item it is given
+# (MapItem.applyNewSavedData on the input stack, no item check) and no longer turns
+# minecraft:map into a filled map, so a plain map stays blank. Vanilla names each
+# map's own item instead and then keeps only filled ones; the entry's name is shared
+# by both forms and those items do not exist before 26.3, so a map entry written for
+# both keeps minecraft:map and its 26.3 form sets the item first. Which item goes with
+# which destination, from vanilla 26.3's chests and cartographer trades:
+MAP_ITEMS = {
+    "minecraft:on_treasure_maps": "minecraft:buried_treasure_map",
+    "minecraft:on_ancient_city_maps": "minecraft:buried_ancient_city_map",
+    "minecraft:on_buried_trial_chambers_maps": "minecraft:buried_trial_chambers_map",
+    "minecraft:on_mineshaft_maps": "minecraft:buried_mineshaft_map",
+    "minecraft:on_desert_pyramid_maps": "minecraft:desert_pyramid_map",
+    "minecraft:on_jungle_pyramid_maps": "minecraft:jungle_pyramid_map",
+    "minecraft:on_ocean_ruin_warm_maps": "minecraft:warm_ocean_ruins_map",
+    "minecraft:on_woodland_mansion_maps": "minecraft:woodland_mansion_map",
+    "minecraft:on_ocean_monument_maps": "minecraft:ocean_monument_map",
+    "minecraft:on_swamp_hut_maps": "minecraft:swamp_hut_map",
+    "minecraft:on_desert_village_maps": "minecraft:desert_village_map",
+    "minecraft:on_plains_village_maps": "minecraft:plains_village_map",
+    "minecraft:on_savanna_village_maps": "minecraft:savanna_village_map",
+    "minecraft:on_snowy_village_maps": "minecraft:snowy_village_map",
+    "minecraft:on_taiga_village_maps": "minecraft:taiga_village_map",
+}
+ANY_MAP_ITEM = "<any 26.3 map item>"   # a destination vanilla has no map item for: any one will do
+KEEP_FILLED = {"type": "minecraft:filtered", "item_filter": {"predicates": {"minecraft:map_id": {}}},
+               "on_fail": {"type": "minecraft:discard"}}
+
+
+def map_item_for(destination) -> str | None:
+    """The 26.3 map item vanilla uses for an exploration_map destination."""
+    if not isinstance(destination, str):
+        return None
+    tag = destination.lstrip("#")
+    tag = tag if ":" in tag else "minecraft:" + tag
+    if tag.startswith("minecraft:on_abandoned_camp_"):
+        return "minecraft:abandoned_camp_map"
+    return MAP_ITEMS.get(tag)
+
+
+def is_map_item(item) -> bool:
+    """An item 26.3 can write a map onto and show as one (not the blank minecraft:map)."""
+    if not isinstance(item, str):
+        return False
+    item = item if ":" in item else "minecraft:" + item
+    return item.endswith("_map") and item not in ("minecraft:map", "minecraft:exploration_map")
+
+
+def _plain_map_entry(e) -> bool:
+    return (isinstance(e, dict) and _short(e.get("type")) == "item"
+            and isinstance(e.get("name"), str) and _short(_ns(e["name"])) == "map")
+
+
+def _steps(m) -> list:
+    return m if isinstance(m, list) else [] if m is None else [m]
+
+
+def _kind(f) -> str | None:
+    return _short(_ns(f.get("type", f.get("function")))) if isinstance(f, dict) else None
 
 
 class _Absent:
@@ -201,13 +262,34 @@ class Converter:
             return "#" + tag
         return v   # not a tag: the converter keeps it and reports it
 
-    def _site_new_only(self, o: dict) -> dict:
+    def entry_function_list(self, e: dict, funcs):
+        """An entry's ``functions`` in 26.3 form. On a plain ``minecraft:map`` each
+        exploration_map gets the map item set before it (the one vanilla uses for that
+        destination, or any map item where vanilla has none) and only filled maps kept
+        after it, as vanilla 26.3 writes its maps."""
+        m = self.function_list(funcs)
+        if not _plain_map_entry(e) or m is None:
+            return m
+        out, has_item = [], False
+        for f in _steps(m):
+            kind = _kind(f)
+            if kind == "set_item" and is_map_item(f.get("item")):
+                has_item = True
+            if kind == "exploration_map" and not has_item:
+                out += [{"type": "minecraft:set_item", "item": map_item_for(f.get("destination")) or ANY_MAP_ITEM},
+                         f, json.loads(json.dumps(KEEP_FILLED))]
+                has_item = True
+                continue
+            out.append(f)
+        return out if len(out) != 1 else out[0]
+
+    def _site_new_only(self, o: dict, entry: bool = False) -> dict:
         """``functions`` / ``conditions`` replaced by the 26.3 keys built from them
         (the script's ``with_new_keys`` then dropping the old keys)."""
         if "functions" in o:
             v = o.pop("functions")
             o.pop("modifier", None)
-            m = self.function_list(v) if isinstance(v, list) else None
+            m = (self.entry_function_list(o, v) if entry else self.function_list(v)) if isinstance(v, list) else None
             if m is not None:
                 o["modifier"] = m
         if "conditions" in o:
@@ -246,7 +328,7 @@ class Converter:
             e["children"] = [self.entry_new_only(c) for c in e["children"]]
         if _short(e.get("type")) == "loot_table" and isinstance(e.get("value"), dict):
             e["value"] = self.table_new_only(e["value"])
-        e = self._site_new_only(e)
+        e = self._site_new_only(e, entry=True)
         if _short(e.get("type")) == "tag" and isinstance(e.get("name"), str):
             e.pop("items", None)
             e["items"] = _tagged(e.pop("name"))
@@ -443,7 +525,7 @@ def _first_difference(a, b, path: str):
             n = min(len(a), len(b))
             return f"{path}[{n}]", (a[n] if len(a) > n else ABSENT), (b[n] if len(b) > n else ABSENT), "value"
         return None
-    if a != b:
+    if a != b and not _any_map(a, b):
         return path, a, b, "value"
     return None
 
@@ -461,7 +543,9 @@ def _explain(want, have, root: str, old_label: str | None) -> tuple[str, str]:
     """``(path, message)`` for the first difference between normalised ``want``
     (built from the old form) and ``have`` (what 26.3 reads)."""
     d = _first_difference(want, have, root)
-    where, w, h, how = d if d else (root, want, have, "value")
+    if d is None:
+        return root, None
+    where, w, h, how = d
     return where, _say(w, h, how, old_label, where)
 
 
@@ -565,8 +649,12 @@ def _differences(a, b, path: str, found: list) -> None:
             for i, (x, y) in enumerate(zip(a, b)):
                 _differences(x, y, f"{path}[{i}]", found)
         return
-    if a != b:
+    if a != b and not _any_map(a, b):
         found.append((path, a, b, "value"))
+
+
+def _any_map(want, have) -> bool:
+    return want == ANY_MAP_ITEM and is_map_item(have)
 
 
 def _unordered(path: str) -> bool:
@@ -666,7 +754,8 @@ def _function_pair(o, n, path, conv, out):
     want, have = _norm(conv.function(old_function(o)), None), _norm(new_function(n), None)
     if want != have:
         where, msg = _explain(want, have, path, "`function`")
-        out.append((where, DISAGREE, msg))
+        if msg:
+            out.append((where, DISAGREE, msg))
 
 
 def _condition_pair(o, n, path, conv, out):
@@ -675,7 +764,8 @@ def _condition_pair(o, n, path, conv, out):
     want, have = _norm_condition(conv.condition(old_condition(o))), _norm_condition(new_condition(n))
     if want != have:
         where, msg = _explain(want, have, path, "`condition`")
-        out.append((where, DISAGREE, msg))
+        if msg:
+            out.append((where, DISAGREE, msg))
 
 
 def _join(path, k):
@@ -703,7 +793,7 @@ def _table(t: dict, path: str, conv: Converter, out) -> None:
 def _entry(e, path: str, conv: Converter, out) -> None:
     if not isinstance(e, dict):
         return
-    _site(e, path, conv, out)
+    _site(e, path, conv, out, entry=True)
     for k, c in enumerate(_list(e.get("children"))):
         _entry(c, f"{path}.children[{k}]", conv, out)
     if _short(e.get("type")) == "loot_table" and isinstance(e.get("value"), dict):
@@ -715,9 +805,10 @@ def _entry(e, path: str, conv: Converter, out) -> None:
                                                    f"`name` gives {_short_json(want)}"))
 
 
-def _site(obj: dict, path: str, conv: Converter, out) -> None:
+def _site(obj: dict, path: str, conv: Converter, out, entry: bool = False) -> None:
     if isinstance(obj.get("functions"), list) and "modifier" in obj:
-        _compare("modifier", "functions", conv.function_list(obj["functions"]), obj["modifier"], path, out)
+        expected = conv.entry_function_list(obj, obj["functions"]) if entry else conv.function_list(obj["functions"])
+        _compare("modifier", "functions", expected, obj["modifier"], path, out)
     if isinstance(obj.get("conditions"), list) and "condition" in obj:
         _compare("condition", "conditions", conv.condition_list(obj["conditions"]), obj["condition"], path, out)
 
@@ -739,4 +830,51 @@ def _compare(new_key: str, old_key: str, expected, actual, path, out) -> None:
                                      f"gives {_short_json(expected)}: 26.3 loses it"))
         return
     at, msg = _explain(a, b, where, f"`{old_key}`")
-    out.append((at, DISAGREE, msg))
+    if msg:
+        out.append((at, DISAGREE, msg))
+
+
+# --- 26.3 map entries -----------------------------------------------------------------------
+
+def blank_maps(table) -> list[tuple[str, str]]:
+    """``(path, message)`` for each plain ``minecraft:map`` entry whose 26.3 form runs
+    exploration_map with no map item set before it: a blank map on 26.3."""
+    out: list[tuple[str, str]] = []
+
+    def entry(e, path):
+        if not isinstance(e, dict):
+            return
+        if _plain_map_entry(e) and "modifier" in e:
+            has_item = False
+            for f in _steps(e["modifier"]):
+                kind = _kind(f)
+                if kind == "set_item" and is_map_item(f.get("item")):
+                    has_item = True
+                if kind == "exploration_map" and not has_item:
+                    dest = f.get("destination")
+                    item = map_item_for(dest)
+                    out.append((f"{path}.modifier", (
+                        "on 26.3 exploration_map writes the map onto the item it is given and no longer turns "
+                        "minecraft:map into a filled map, so this gives a blank map. In the 26.3 form, set the "
+                        f"item first (set_item {item or 'a map item'}"
+                        f"{', the one vanilla uses for ' + str(dest) if item else ''}) and keep only filled "
+                        "maps after it (filtered on minecraft:map_id, on_fail discard), as vanilla 26.3 does")))
+                    break
+        for k, c in enumerate(_list(e.get("children"))):
+            entry(c, f"{path}.children[{k}]")
+        if _short(e.get("type")) == "loot_table" and isinstance(e.get("value"), dict):
+            table_(e["value"], f"{path}.value")
+        for i, f in enumerate(_steps(e.get("modifier"))):
+            if _kind(f) == "set_contents":
+                for j, x in enumerate(_list(f.get("entries"))):
+                    entry(x, f"{path}.modifier[{i}].entries[{j}]")
+
+    def table_(t, path):
+        for i, p in enumerate(_list(t.get("pools"))):
+            if isinstance(p, dict):
+                for j, e in enumerate(_list(p.get("entries"))):
+                    entry(e, f"{_join(path, 'pools')}[{i}].entries[{j}]")
+
+    if isinstance(table, dict):
+        table_(table, "")
+    return out

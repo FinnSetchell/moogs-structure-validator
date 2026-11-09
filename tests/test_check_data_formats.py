@@ -27,10 +27,12 @@ VERSIONS = [
 
 REGISTRIES = {
     "loot_function_type": ["set_count", "enchant_randomly", "enchant_with_levels", "set_contents", "sequence",
-                           "filtered", "modify_contents", "exploration_map"],
+                           "filtered", "modify_contents", "exploration_map", "set_item", "set_name",
+                           "discard"],
     "loot_condition_type": ["random_chance", "survives_explosion", "all_of", "any_of", "inverted",
                             "entity_properties"],
-    "item": ["diamond", "book", "iron_ingot", "stone", "chain", "iron_chain"],
+    "item": ["diamond", "book", "iron_ingot", "stone", "chain", "iron_chain", "map", "filled_map",
+             "buried_treasure_map", "abandoned_camp_map"],
     "block": ["stone", "water", "iron_chain"],
     "worldgen/biome": ["plains", "desert"],
     "tag/worldgen/biome": ["is_overworld"],
@@ -1029,3 +1031,95 @@ def test_loader_files_that_meet_no_build_are_one_error_naming_the_newest(tmp_pat
     assert ("[ERROR] on 1.21.4 fabric.mod.json `>=9.0.0`, quilt.mod.json `>=9.0.0` accept no MSL build published "
             "there (the newest is ") in out
     assert "so no player can run the mod there" in out
+
+
+
+# --- 26.3 treasure maps --------------------------------------------------------------------
+# On 26.3 exploration_map writes the map onto the item it is given, so a plain
+# minecraft:map stays blank; vanilla names each map's own item (buried_treasure_map
+# for #minecraft:on_treasure_maps) and keeps only filled maps.
+
+MAP_OLD = {"function": "minecraft:exploration_map", "destination": "minecraft:on_treasure_maps",
+           "decoration": "red_x", "zoom": 1, "skip_existing_chunks": False}
+MAP_NEW = {"type": "minecraft:exploration_map", "destination": "#minecraft:on_treasure_maps",
+           "decoration": "red_x", "zoom": 1, "skip_existing_chunks": False}
+KEEP_FILLED = {"type": "minecraft:filtered", "item_filter": {"predicates": {"minecraft:map_id": {}}},
+               "on_fail": {"type": "minecraft:discard"}}
+SET_TREASURE = {"type": "minecraft:set_item", "item": "minecraft:buried_treasure_map"}
+
+
+def _map_entry(modifier, name="minecraft:map", functions=(MAP_OLD,)):
+    e = {"type": "minecraft:item", "name": name, "modifier": modifier}
+    if functions is not None:
+        e["functions"] = list(functions)
+    return e
+
+
+@pytest.fixture
+def map_tags(monkeypatch):
+    monkeypatch.setitem(REGISTRIES, "tag/worldgen/structure", ["on_treasure_maps"])
+
+
+def test_a_map_written_as_mos_does_passes(tmp_path, stubbed, map_tags, capsys):
+    # MOS 5671664: minecraft:map in both forms; the 26.3 form sets the treasure map first.
+    root = _project(tmp_path, {"data/test/loot_table/t.json": _table(_map_entry([SET_TREASURE, MAP_NEW, KEEP_FILLED]))})
+    passed, _ = _run(root, ["1.21", "26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+
+
+def test_a_plain_map_on_26_3_is_blank_and_said_once(tmp_path, stubbed, map_tags, capsys):
+    # MOS before 5671664: the 26.3 form only renamed the keys.
+    root = _project(tmp_path, {"data/test/loot_table/t.json": _table(_map_entry(MAP_NEW))})
+    passed, summary = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed and "1 error(s) on 26.3" in summary, out
+    assert "so this gives a blank map" in out
+    assert "set_item minecraft:buried_treasure_map, the one vanilla uses for #minecraft:on_treasure_maps" in out
+    assert "disagree" not in out and "loses it" not in out   # not again as a disagreement
+
+
+def test_only_26_3_a_plain_map_fails_and_vanillas_layout_passes(tmp_path, stubbed, map_tags, capsys):
+    root = _project(tmp_path, {"data/test/loot_table/t.json": _table(_map_entry(MAP_NEW, functions=None))})
+    passed, _ = _run(root, ["26.3"])
+    assert not passed and "blank map" in capsys.readouterr().out
+    vanilla = _map_entry([MAP_NEW, KEEP_FILLED], name="minecraft:buried_treasure_map", functions=None)
+    root = _project(tmp_path / "vanilla", {"data/test/loot_table/t.json": _table(vanilla)})
+    passed, _ = _run(root, ["26.3"])
+    assert passed, capsys.readouterr().out
+
+
+def test_a_destination_vanilla_has_no_map_for_takes_any_map_item(tmp_path, stubbed, capsys):
+    old = dict(MAP_OLD, destination="test:ruins")
+    new = dict(MAP_NEW, destination="#test:ruins")
+    files = {"data/test/tags/worldgen/structure/ruins.json": {"values": []}}
+    camp = {"type": "minecraft:set_item", "item": "minecraft:abandoned_camp_map"}
+    root = _project(tmp_path, dict(files, **{"data/test/loot_table/t.json": _table(
+        _map_entry([camp, new, KEEP_FILLED], functions=[old]))}))
+    passed, _ = _run(root, ["26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+    root = _project(tmp_path / "blank", dict(files, **{"data/test/loot_table/t.json": _table(
+        _map_entry(new, functions=[old]))}))
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed and "set_item a map item" in out, out
+
+
+def test_an_overlay_map_with_the_steps_passes(tmp_path, stubbed, map_tags, capsys):
+    base = _table({"type": "minecraft:item", "name": "minecraft:map", "functions": [MAP_OLD]})
+    overlay = _table(_map_entry([SET_TREASURE, MAP_NEW, KEEP_FILLED], functions=None))
+    root = _project(tmp_path, {"data/test/loot_table/t.json": base, "ov_26_3/data/test/loot_table/t.json": overlay},
+                    pack=OVERLAY_PACK)
+    passed, _ = _run(root, ["26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+
+
+def test_the_converter_puts_the_map_steps_around_exploration_map():
+    from core.loot_forms import Converter
+    conv = Converter({"minecraft:on_treasure_maps"})
+    named = {"function": "minecraft:set_name", "name": "Treasure"}
+    got = conv.entry_function_list({"type": "minecraft:item", "name": "minecraft:map"}, [MAP_OLD, named])
+    assert [f["type"] for f in got] == ["minecraft:set_item", "minecraft:exploration_map", "minecraft:filtered",
+                                        "minecraft:set_name"]
+    assert got[0]["item"] == "minecraft:buried_treasure_map"
+    plain = conv.entry_function_list({"type": "minecraft:item", "name": "minecraft:compass"}, [MAP_OLD])
+    assert plain["type"] == "minecraft:exploration_map"

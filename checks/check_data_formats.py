@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING
 from core.claims import claimed_versions, resolve_claims
 from core.context import services
 from core.formats import Pack, classify, effective_files, load_model, neighbour_lists, read_tag, version_reader
-from core.loot_forms import FORM_KINDS, LOOT_RENAME, Converter, disagreements
+from core.loot_forms import BLANK_MAP, FORM_KINDS, LOOT_RENAME, Converter, blank_maps, disagreements
 from core.mcdoc import Finding, version_points
 from core.mcversions import parse_version
 from core import msl_upgrade
@@ -314,11 +314,26 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     # copies have nothing to agree with 26.3 on.
     old_side = [v for v in checkable if parse_version(v) < LOOT_RENAME]
     new_side = [v for v in checkable if parse_version(v) >= LOOT_RENAME]
+    # A map entry 26.3 hands out blank: reported once, here, rather than again as a
+    # disagreement between the forms.
+    blank_at: dict[str, set[str]] = defaultdict(set)
+    for (kind, _rid), by_path in sorted(forms_loaded.items()):
+        if kind != "loot_table":
+            continue
+        for pn, vs in sorted(by_path.items()):
+            vn = sorted(v for v in vs if parse_version(v) >= LOOT_RENAME)
+            if not vn:
+                continue
+            shown = pn.relative_to(resources).as_posix()
+            for where, msg in blank_maps(project.try_json(pn)):
+                blank_at[shown].add(where)
+                f = Finding(where, BLANK_MAP, detail=msg)
+                found.setdefault((shown, kind, _identity(f)), [[], f])[0].extend(vn)
     if old_side and new_side:
         newest = svc.mcmeta.data(new_side[-1])
         tags = {"minecraft:" + t for t in newest.get("tag/worldgen/structure", [])}
         for rel in project.json_files(project.data_root):
-            r = classify(rel.relative_to(project.data_root).as_posix(), resource_kinds, set())
+            r = classify(rel.relative_to(project.data_root).as_posix(), resource_kinds, {"worldgen/structure"})
             if r is not None and r.tag_registry == "worldgen/structure":
                 tags.add(r.id)
         conv = Converter(tags)
@@ -337,6 +352,9 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                     shown = pn.relative_to(resources).as_posix()
                     other = "" if po == pn else f" (the old form is read from {po.relative_to(resources).as_posix()})"
                     for where, code, msg in disagreements(kind, old, new, conv):
+                        if any(where == b or where.startswith(b + "[") or where.startswith(b + ".")
+                               for b in blank_at.get(shown, ())):
+                            continue
                         f = Finding(where, code, detail=msg + other)
                         found.setdefault((shown, kind, _identity(f)), [[], f])[0].extend(sorted(vo | vn))
 
