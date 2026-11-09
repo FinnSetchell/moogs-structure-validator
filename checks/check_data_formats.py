@@ -366,8 +366,11 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
               f"({'; '.join(msl_sources)})")
         for name, feat in builds.features.items():
             what = feat["what"].split(" (")[0]
-            if msl_relied.get(name):
-                ok = sorted(msl_relied[name], key=order.index)
+            # Not where the mod accepts no MSL build at all: nothing runs there, as the
+            # error below says.
+            ok = [v for v in sorted(msl_relied.get(name, ()), key=order.index)
+                  if builds.effective(v, msl_min) is not None or not builds.per_loader(v, msl_min)]
+            if ok:
                 print(f"    on {_ranges(ok, order)} it runs with MSL "
                       f"{msl_upgrade.fmt(builds.effective(ok[0], msl_min))} or newer, which {what}")
             if msl_short.get(name):

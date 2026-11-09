@@ -1033,6 +1033,23 @@ def test_loader_files_that_meet_no_build_are_one_error_naming_the_newest(tmp_pat
     assert "so no player can run the mod there" in out
 
 
+def test_no_msl_line_where_no_build_the_mod_accepts_exists(tmp_path, stubbed, capsys):
+    # R3's M12b: capped below MSL's first 26.3 build, the mod runs nowhere on 26.3, so
+    # nothing says it runs there with some MSL; the refusal says why.
+    table = {"type": "minecraft:chest", "pools": [{"rolls": {"min": 1, "max": 3}, "entries": [DUAL_ENTRY]}]}
+    root = _project(tmp_path, {"data/test/loot_table/chest.json": table})
+    _fabric_dep(root, ">=3.0.0 <3.3.0")
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed and "accepts no MSL build published there" in out, out
+    assert "it runs with MSL" not in out, out
+    root = _project(tmp_path / "open", {"data/test/loot_table/chest.json": table})
+    _fabric_dep(root, ">=3.0.0")
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert passed and "on 26.3 it runs with MSL 3.3.0 or newer" in out, out
+
+
 
 # --- 26.3 treasure maps --------------------------------------------------------------------
 # On 26.3 exploration_map writes the map onto the item it is given, so a plain
