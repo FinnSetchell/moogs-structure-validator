@@ -85,10 +85,13 @@ _MSL_TYPE_WINDOWS: dict[str, tuple[int | None, int | None]] = {
 # `git grep` on every tag) and its CHANGELOG. 3.0.0 added the processors (first
 # tags 1.21.1-3.0.0-alpha.1 and 1.20.4-3.0.0-alpha.2; trial spawner and vault in
 # commit 02c2aed), 3.1.0 the replace-vanilla processor and placement, 3.1.2 the
-# hanging entity anchor. Types not listed are already in the oldest tag (v2.0.0:
-# the structure types, pool elements, advanced_random_spread, waterlogging_fix);
-# MSL 1.x is not in git, so no floor is recorded for them rather than a guess.
+# hanging entity anchor. MSL 1.x is not tagged, so it was read from the published
+# jars themselves (the registration classes' string constants of 1.0.0, 1.0.1, 1.0.2
+# and 1.1.0 builds, on Fabric, Forge and NeoForge): every type in tag v2.0.0 is in
+# 1.0.0 except versioned_single_pool_element, first in 1.1.0 (git: added 2025-11-11,
+# after 1.0.2 shipped). Types not listed are in MSL 1.0.0, the first release.
 _MSL_TYPE_SINCE: dict[str, tuple[int, int, int]] = {
+    "moogs_structures:versioned_single_pool_element": (1, 1, 0),
     "moogs_structures:pillar_processor": (3, 0, 0),
     "moogs_structures:spawner_randomizing_processor": (3, 0, 0),
     "moogs_structures:trial_spawner_randomizing_processor": (3, 0, 0),
@@ -466,13 +469,23 @@ def _check_msl_releases(ctx, svc, used: dict) -> int:
             print(f"  [msl] {type_id} first shipped in MSL {msl_upgrade.fmt(since)}")
             print(f"    on {runs} {allows}, which does not register it, so "
                   f"{', '.join(files[:3])}{more} fail to load there. Raise the moogs_structures minimum "
-                  f"to {msl_upgrade.fmt(since)}.")
+                  f"to {msl_upgrade.fmt(since)}{_fabric_hint(since)}.")
         else:
             print(f"  [msl] {type_id} `{key[1]}` first read by MSL {msl_upgrade.fmt(since)}")
             print(f"    on {runs} {allows}, which skips it without a word, so "
                   f"{', '.join(files[:3])}{more} lose what it sets there. Raise the moogs_structures "
-                  f"minimum to {msl_upgrade.fmt(since)}.")
+                  f"minimum to {msl_upgrade.fmt(since)}{_fabric_hint(since)}.")
     return errors
+
+
+def _fabric_hint(since) -> str:
+    """MSL's 1.x and 2.x Fabric builds call themselves "1.1.0-1.20-1.20.4": Fabric and
+    Quilt order that below 1.1.0, so the minimum is spelled with "-0" there."""
+    if tuple(since) >= (3, 0, 0):
+        return ""
+    v = msl_upgrade.fmt(since)
+    return (f" (`>={v}-0` in fabric.mod.json and quilt.mod.json: MSL's {v} Fabric builds carry a "
+            f"suffix, which Fabric orders below {v}, so `>={v}` would reject them)")
 
 
 def _version_runs(versions: list[str], order: list[str]) -> str:

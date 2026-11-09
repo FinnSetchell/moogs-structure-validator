@@ -756,10 +756,36 @@ def test_per_piece_carving_on_1_21_is_silent(tmp_path, monkeypatch, capsys):
 
 def test_a_low_minimum_on_1_20_does_not_blame_the_release(tmp_path, monkeypatch, capsys):
     # On 1.20 no MSL reads it, so raising the minimum would not help: no release error there.
+    # (1.1.0 is the first MSL with the versioned element itself.)
     stub_registries(monkeypatch)
     _write(tmp_path, "test", "template_pool", "start.json", _pool([VERSIONED_WITH_CARVING]))
-    _msl_mod(tmp_path, "*")
+    _msl_mod(tmp_path, ">=1.1.0-0")
     passed, _ = mod.run(FakeContext("test", ["1.20.4", "1.20.6"], tmp_path))
     out = capsys.readouterr().out
     assert passed, out
     assert "first read by MSL" not in out and "[WARN]" in out
+
+
+
+VERSIONED_POOL = {"element_type": "moogs_structures:versioned_single_pool_element", "location": "test:start",
+                  "projection": "rigid", "processors": "minecraft:empty"}
+
+
+def test_the_versioned_element_needs_msl_1_1_0(tmp_path, monkeypatch, capsys):
+    # MSL 1.0.0 and 1.0.1 do not register it ("Failed to load registries" on MES with "*").
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "template_pool", "start.json", _pool([VERSIONED_POOL]))
+    _msl_mod(tmp_path, "*")
+    passed, _ = mod.run(FakeContext("test", ["1.21", "1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert "versioned_single_pool_element first shipped in MSL 1.1.0" in out
+    assert "`>=1.1.0-0` in fabric.mod.json and quilt.mod.json" in out
+
+
+def test_the_versioned_element_with_the_fabric_spelling_passes(tmp_path, monkeypatch, capsys):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "template_pool", "start.json", _pool([VERSIONED_POOL]))
+    _msl_mod(tmp_path, ">=1.1.0-0")
+    passed, _ = mod.run(FakeContext("test", ["1.20.4", "1.20.6", "1.21", "1.21.1"], tmp_path))
+    assert passed, capsys.readouterr().out
