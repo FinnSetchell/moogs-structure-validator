@@ -142,9 +142,12 @@ vanilla-mcdoc symbol table pinned in `data/format_model/`:
 - `checks/check_worldgen_schemas.py` `_MSL_TYPE_SINCE` -- the first MSL release of
   each `moogs_structures:` type. Add a type MSL adds, with the release it ships in.
   `_MSL_FIELD_SINCE` does the same for a field MSL adds to a type that already
-  exists (find it with `git grep -E '[fF]ieldOf\("' <tag>` on each tag).
-- `data/msl_builds.json` -- the oldest MSL published for each Minecraft version
-  (from Modrinth) and, per MSL behaviour the check models, the Minecraft window and
+  exists (find it with `git grep -E '[fF]ieldOf\("' <tag>` on each tag). MSL 1.x has
+  no tags: its types were read from the published jars' registration classes.
+- `data/msl_builds.json` -- every MSL build per loader and Minecraft version, with the
+  version its loader compares (`builds`: read from the jar where one was at hand,
+  otherwise following what every jar read shows), the oldest MSL published for each
+  Minecraft version (from Modrinth) and, per MSL behaviour the check models, the Minecraft window and
   the first MSL release that has it, with the source file. When MSL gains a data
   behaviour the mods rely on (or a new Minecraft version ships), update it here.
 - `data/allowed_keys.json` -- keys no version reads that are let through because
