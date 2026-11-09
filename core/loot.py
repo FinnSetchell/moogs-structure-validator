@@ -68,6 +68,38 @@ def iter_enchanted_book_loot_entries(json_path: Path, data: object = None) -> It
     yield from iter_matching_loot_entries(json_path, lambda name: name == "minecraft:enchanted_book", data)
 
 
+ENCHANTED_BOOK = {"minecraft:enchanted_book", "enchanted_book"}
+_ITEM_ENTRY = {"minecraft:item", "item"}
+_GIVES_ITEM = {"set_item", "set_contents", "give_item"}
+
+
+def iter_enchanted_book_mentions(node: object, path: str = "") -> Iterator[tuple[str, str]]:
+    """``(path, id)`` wherever loot data hands out ``minecraft:enchanted_book``: an
+    item entry's ``name`` (in any pool, child, inline table or set_contents list), and
+    the ``item`` of a ``set_item`` / ``set_contents`` / ``give_item`` function, in the
+    old form (``function``) or 26.3's (``type``). A condition that only tests for the
+    item (``match_tool`` and the like) hands nothing out and is left alone."""
+    join = (lambda k: f"{path}.{k}" if path else k)
+    if isinstance(node, dict):
+        kind = node.get("type")
+        if kind in _ITEM_ENTRY and node.get("name") in ENCHANTED_BOOK:
+            yield join("name"), node["name"]
+        func = node.get("function", kind)
+        if isinstance(func, str) and func.split(":", 1)[-1] in _GIVES_ITEM:
+            item = node.get("item")
+            if isinstance(item, str) and item in ENCHANTED_BOOK:
+                yield join("item"), item
+            elif isinstance(item, dict):
+                for k in ("id", "name"):
+                    if item.get(k) in ENCHANTED_BOOK:
+                        yield f"{join('item')}.{k}", item[k]
+        for k, v in node.items():
+            yield from iter_enchanted_book_mentions(v, join(k))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from iter_enchanted_book_mentions(v, f"{path}[{i}]")
+
+
 def collect_loot_ids(node: object, items: set[str], blocks: set[str]) -> None:
     """Item and block ids a loot table names: item entries, ``set_item`` style
     functions, ``set_contents``/``give_item`` payloads, and
