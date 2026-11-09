@@ -341,6 +341,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                         found.setdefault((shown, kind, _identity(f)), [[], f])[0].extend(sorted(vo | vn))
 
     msl_short_warns: list[str] = []
+    msl_refused: list[list[str]] = []
+    msl_passed = 0
     if uses_msl:
         print(f"  Moog's Structure Lib: this mod allows {msl_upgrade.fmt(msl_min)} "
               f"({'; '.join(msl_sources)})")
@@ -357,6 +359,26 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                       f"the first that {what}, so the files are read without it there. Raise the "
                       f"moogs_structures minimum to {feat['msl_from']} to rely on it.")
                 msl_short_warns.append(name)
+        # Each loader file read the way its loader reads it, against the MSL builds that
+        # loader can load: Fabric orders "1.1.0-1.20-1.20.4" below 1.1.0.
+        refused: dict[str, list[str]] = defaultdict(list)
+        passed: dict[tuple[str, str], list[str]] = defaultdict(list)
+        for v in checkable:
+            for where in builds.refused(v, msl_min):
+                refused[where].append(v)
+            for where, named in builds.passed_over(v, msl_min):
+                passed[(where, named)].append(v)
+        for where, vs in sorted(refused.items()):
+            sample = builds.on(next((lo for lo, _s, w in msl_min.specs if w == where), "fabric"), vs[0])[:3]
+            print(f"  [ERROR] on {_ranges(vs, order)} {where} accepts no MSL build (there: "
+                  f"{', '.join(sample)}{' ...' if len(sample) == 3 else ''}), so no player on that loader can "
+                  f"run the mod there")
+            msl_refused.append(vs)
+        for (where, named), vs in sorted(passed.items()):
+            print(f"  [WARN] on {_ranges(vs, order)} {where} rejects the MSL {named} builds there: Fabric orders "
+                  f"a version with a suffix, such as {named}-1.20-1.20.4, below {named}. Write `>={named}-0` "
+                  f"to accept them")
+            msl_passed += 1
 
     # Report: errors first, grouped by file, versions folded into ranges.
     by_file: dict[tuple[str, str], list] = defaultdict(list)
@@ -425,9 +447,12 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         print(f"  {gaps_applied} finding(s) explained by known model gaps (data/format_model/model.json)")
     if allowed_hits:
         print(f"  {len(allowed_hits)} key(s) no version reads let through as harmless (data/allowed_keys.json)")
-    errors += len(msl_short_warns)
+    errors += len(msl_short_warns) + len(msl_refused)
+    warns += msl_passed
     for name in msl_short_warns:
         error_versions.update(msl_short[name])
+    for vs in msl_refused:
+        error_versions.update(vs)
 
     failed = errors > 0 or bool(unverified) or bool(problems) or bool(unknown)
     parts = [f"{total_files} files x {len(checkable)} versions"]

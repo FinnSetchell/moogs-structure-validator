@@ -949,3 +949,67 @@ def test_f03_a_change_in_a_moved_pool_is_still_found(tmp_path, stubbed, capsys):
                                                   {"rolls": 1, "entries": [BOOK_NEW]}]}
     out = _overlay_fails(tmp_path / "lost", base, moved, capsys)
     assert "pools[1].entries" in out and "26.3 lacks minecraft:diamond" in out
+
+
+
+# --- MSL versions as each loader reads them ---------------------------------------------
+
+@pytest.mark.parametrize("spec, version, ok", [
+    (">=1.1.0", "1.1.0-1.20-1.20.4", False),     # a pre-release of 1.1.0 to Fabric
+    (">=1.1.0-0", "1.1.0-1.20-1.20.4", True),
+    (">=1.1.0-0", "1.0.2-1.21.4-fabric", False),
+    ("*", "1.0.0-fabric", True),
+    (">=3.3.0", "3.3.0+fabric", True),          # build metadata is ignored
+    (">=2.0.2", "2.0.2-fabric", False),
+    ("^3.0.0", "3.9.1+fabric", True),
+    ("^3.0.0", "4.0.0", False),
+    (">=3.0.0 <3.4.0", "3.4.0", False),
+])
+def test_fabric_reads_msl_versions_as_semantic_versions(spec, version, ok):
+    assert msl_upgrade.fabric_accepts(spec, version) is ok
+
+
+@pytest.mark.parametrize("spec, version, ok", [
+    ("[1.1.0,)", "1.1.0-1.20-1.20.4", True),    # a numeric qualifier sorts above the release
+    ("[3.2.0,)", "3.2.0-alpha.1", False),
+    ("[1.0,2.0)", "2.0.0", False),
+    ("1.0", "0.1", True),                       # a bare version only recommends
+])
+def test_forge_reads_msl_versions_as_maven_versions(spec, version, ok):
+    assert msl_upgrade.maven_accepts(spec, version) is ok
+
+
+def _fabric_dep(root: Path, fabric: str) -> Path:
+    res = root / "src" / "main" / "resources"
+    _write(res / "fabric.mod.json", {"id": "test", "depends": {"moogs_structures": fabric}})
+    (res / "data" / "test").mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def test_the_oldest_build_a_predicate_accepts_is_the_msl_it_runs_with(tmp_path):
+    b = msl_upgrade.MslBuilds()
+    star, _ = msl_upgrade.declared_minimum(_fabric_dep(tmp_path / "a", "*"))
+    plain, _ = msl_upgrade.declared_minimum(_fabric_dep(tmp_path / "b", ">=1.1.0"))
+    dash, _ = msl_upgrade.declared_minimum(_fabric_dep(tmp_path / "c", ">=1.1.0-0"))
+    assert b.effective("1.21.1", star) == (1, 0, 0)
+    assert b.effective("1.21.1", dash) == (1, 1, 0)
+    assert b.effective("1.21.1", plain) > (1, 1, 0)   # every 1.1.0 build there is passed over
+    assert b.passed_over("1.20.1", plain) == [("fabric.mod.json `>=1.1.0`", "1.1.0")]
+    assert b.passed_over("1.20.1", dash) == []
+
+
+def test_a_minimum_no_build_meets_is_an_error(tmp_path, stubbed, capsys):
+    root = _fabric_dep(tmp_path, ">=9.0.0")
+    passed, summary = _run(root, ["1.21", "1.21.1"])
+    out = capsys.readouterr().out
+    assert not passed and "error" in summary, out
+    assert "[ERROR] on 1.21-1.21.1 fabric.mod.json `>=9.0.0` accepts no MSL build" in out
+
+
+def test_a_minimum_that_passes_over_its_own_release_warns(tmp_path, stubbed, capsys):
+    root = _fabric_dep(tmp_path, ">=1.1.0")
+    passed, summary = _run(root, ["1.21", "1.21.1"])
+    out = capsys.readouterr().out
+    assert passed and "warning" in summary, out
+    assert "fabric.mod.json `>=1.1.0` rejects the MSL 1.1.0 builds there" in out
+    assert "Write `>=1.1.0-0` to accept them" in out

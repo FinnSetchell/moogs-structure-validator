@@ -181,6 +181,127 @@ def _semver(text: str) -> tuple[int, ...] | None:
     return tuple(int(x or 0) for x in m.groups())
 
 
+# Fabric Loader's ordering (SemanticVersionImpl): numbers compared one by one, the
+# missing ones as 0; a pre-release (after the first "-") sorts below the release, its
+# dot-separated parts compared as numbers when both are numbers, numbers below words;
+# build metadata (after "+") is ignored. MSL's 1.x and 2.x Fabric builds call
+# themselves "1.1.0-1.20-1.20.4" or "2.0.2-fabric": pre-releases, below 1.1.0 and 2.0.2.
+
+def fabric_version(text: str):
+    """``(numbers, pre-release parts or None)``, or None for a version Fabric cannot
+    read as semantic."""
+    core = text.strip().split("+", 1)[0]
+    head, dash, pre = core.partition("-")
+    parts = head.split(".")
+    if not parts or not all(x.isdigit() for x in parts):
+        return None
+    return [int(x) for x in parts], (pre.split(".") if dash else None)
+
+
+def fabric_compare(a, b) -> int:
+    (na, pa), (nb, pb) = a, b
+    n = max(len(na), len(nb))
+    na, nb = na + [0] * (n - len(na)), nb + [0] * (n - len(nb))
+    if na != nb:
+        return -1 if na < nb else 1
+    if pa is None or pb is None:
+        return 0 if pa is pb else (1 if pa is None else -1)
+    for x, y in zip(pa, pb):
+        if x == y:
+            continue
+        if x.isdigit() and y.isdigit():
+            return -1 if int(x) < int(y) else 1
+        if x.isdigit() != y.isdigit():
+            return -1 if x.isdigit() else 1
+        return -1 if x < y else 1
+    return (len(pa) > len(pb)) - (len(pa) < len(pb))
+
+
+def fabric_accepts(spec: str, version: str) -> bool | None:
+    """Whether a Fabric or Quilt version predicate accepts ``version``: space-separated
+    terms all hold (``>=``, ``<=``, ``>``, ``<``, ``=``, ``^``, ``~``, ``*``, ``1.2.x``).
+    None when it cannot be read."""
+    v = fabric_version(version)
+    if v is None:
+        return None
+    terms = spec.split()
+    if not terms:
+        return None
+    for t in terms:
+        if t == "*":
+            continue
+        op = next((o for o in (">=", "<=", ">", "<", "=", "^", "~") if t.startswith(o)), "")
+        target = t[len(op):]
+        if target.endswith((".x", ".X", ".*")) and not op:
+            fixed = [int(x) for x in target.split(".")[:-1] if x.isdigit()]
+            if v[0][:len(fixed)] != fixed:
+                return False
+            continue
+        w = fabric_version(target)
+        if w is None:
+            return None
+        c = fabric_compare(v, w)
+        ok = {">=": c >= 0, "<=": c <= 0, ">": c > 0, "<": c < 0, "=": c == 0, "": c == 0,
+              "^": c >= 0 and v[0][:1] == w[0][:1],
+              "~": c >= 0 and v[0][:2] == (w[0] + [0])[:2]}[op]
+        if not ok:
+            return False
+    return True
+
+
+# Forge and NeoForge compare with Maven's ComparableVersion: alpha, beta, milestone,
+# rc and snapshot qualifiers sort below the release, any other qualifier (MSL's
+# "1.1.0-1.20-1.20.4") above it.
+_MAVEN_PRE = ("alpha", "a", "beta", "b", "milestone", "m", "rc", "cr", "snapshot")
+
+
+def _maven_key(text: str):
+    m = re.match(r"\s*(\d+(?:\.\d+)*)(.*)", text)
+    if not m:
+        return None
+    nums = [int(x) for x in m.group(1).split(".")]
+    nums += [0] * (3 - len(nums))
+    q = m.group(2).lstrip("-.").lower()
+    rank = 1 if not q else 0 if re.match(r"(%s)(\b|\d|[.-]|$)" % "|".join(_MAVEN_PRE), q) else 2
+    return nums, rank
+
+
+def maven_accepts(spec: str, version: str) -> bool | None:
+    """Whether a Maven range (``[3.0.0,)``, ``(,2.0]``, ``[1.0]``, several joined by
+    commas) accepts ``version``. A bare version is only a recommendation: anything."""
+    spec = spec.strip()
+    if not spec or spec == "*":
+        return True
+    groups = re.findall(r"([\[(])([^\])]*)([\])])", spec)
+    if not groups:
+        return True if _maven_key(spec) else None
+    v = _maven_key(version)
+    if v is None:
+        return None
+    for lo_b, body, hi_b in groups:
+        if "," not in body:
+            if _maven_key(body) == v:
+                return True
+            continue
+        lo, hi = (x.strip() for x in body.split(",", 1))
+        ok = True
+        if lo:
+            k = _maven_key(lo)
+            ok = ok and (v > k if lo_b == "(" else v >= k)
+        if hi:
+            k = _maven_key(hi)
+            ok = ok and (v < k if hi_b == ")" else v <= k)
+        if ok:
+            return True
+    return False
+
+
+def accepts(loader: str, spec: str, version: str) -> bool | None:
+    if loader in ("fabric", "quilt"):
+        return fabric_accepts(spec, version)
+    return maven_accepts(spec, version)
+
+
 def range_floor(spec: str) -> tuple[int, ...] | None:
     """The lowest MSL version a dependency range allows.
 
@@ -214,7 +335,14 @@ def range_floor(spec: str) -> tuple[int, ...] | None:
     return min(floors) if floors else None
 
 
-def declared_minimum(project_root) -> tuple[tuple[int, ...] | None, list[str]]:
+class Requirement(tuple):
+    """The lowest MSL any loader file allows, as a version tuple, which also keeps
+    each file's own predicate (``specs``: ``(loader, spec, where)``) so it can be read
+    against the builds each loader can load, as the loader reads it."""
+    specs: list = []
+
+
+def declared_minimum(project_root) -> tuple[Requirement | None, list[str]]:
     """The lowest Moog's Structure Lib any of the mod's loader files allows,
     and where each bound was read. ``(None, [])`` when the mod does not depend
     on MSL at all."""
@@ -223,16 +351,19 @@ def declared_minimum(project_root) -> tuple[tuple[int, ...] | None, list[str]]:
     root = Path(project_root)
     res = root / "src" / "main" / "resources"
     found: list[tuple[tuple[int, ...] | None, str]] = []
+    specs: list[tuple[str, str, str]] = []
 
-    def add(spec, where):
+    def add(loader, spec, where):
         found.append((range_floor(spec) if isinstance(spec, str) else None, f"{where} `{spec}`"))
+        if isinstance(spec, str) and "${" not in spec:
+            specs.append((loader, spec, f"{where} `{spec}`"))
 
     try:
         meta = json.loads((res / "fabric.mod.json").read_text(encoding="utf-8-sig"))
         dep = (meta.get("depends") or {}).get("moogs_structures")
         if dep is not None:
             for spec in (dep if isinstance(dep, list) else [dep]):
-                add(spec, "fabric.mod.json")
+                add("fabric", spec, "fabric.mod.json")
     except (OSError, ValueError):
         pass
     try:
@@ -241,7 +372,7 @@ def declared_minimum(project_root) -> tuple[tuple[int, ...] | None, list[str]]:
             if isinstance(d, dict) and d.get("id") == "moogs_structures":
                 v = d.get("versions", "*")
                 for spec in (v if isinstance(v, list) else [v]):
-                    add(spec, "quilt.mod.json")
+                    add("quilt", spec, "quilt.mod.json")
     except (OSError, ValueError):
         pass
     props = {}
@@ -257,6 +388,7 @@ def declared_minimum(project_root) -> tuple[tuple[int, ...] | None, list[str]]:
             text = (res / toml).read_text(encoding="utf-8")
         except OSError:
             continue
+        loader = "neoforge" if toml.startswith("META-INF/neoforge") else "forge"
         for block in re.split(r"\[\[dependencies\.", text)[1:]:
             if not re.search(r"""modId\s*=\s*["']moogs_structures["']""", block):
                 continue
@@ -265,18 +397,23 @@ def declared_minimum(project_root) -> tuple[tuple[int, ...] | None, list[str]]:
             ph = re.fullmatch(r"\$\{(\w+)\}", spec.strip())
             if ph and ph.group(1) in props:
                 spec = props[ph.group(1)]
-                add(spec, f"{toml.split('/')[-1]} (gradle.properties {ph.group(1)})")
+                add(loader, spec, f"{toml.split('/')[-1]} (gradle.properties {ph.group(1)})")
             else:
-                add(spec, toml.split("/")[-1])
+                add(loader, spec, toml.split("/")[-1])
     if not found:
         return None, []
     floors = [f for f, _ in found if f is not None]
-    return (min(floors) if floors else None), [w for _, w in found]
+    if not floors:
+        return None, [w for _, w in found]
+    req = Requirement(min(floors))
+    req.specs = specs
+    return req, [w for _, w in found]
 
 
 class MslBuilds:
-    """``data/msl_builds.json``: the oldest MSL per Minecraft version, and from
-    which MSL release each of its data behaviours runs."""
+    """``data/msl_builds.json``: every MSL build per loader and Minecraft version (the
+    version its loader compares), the oldest MSL per Minecraft version, and from which
+    MSL release each of its data behaviours runs."""
 
     def __init__(self, path=None):
         import json
@@ -285,6 +422,7 @@ class MslBuilds:
         data = json.loads(path.read_text(encoding="utf-8"))
         self.oldest = {k: _semver(v) for k, v in data["oldest_build"].items()}
         self.features = data["features"]
+        self.builds = data.get("builds", [])
 
     def oldest_build(self, version: str) -> tuple[int, ...] | None:
         if version in self.oldest:
@@ -294,14 +432,54 @@ class MslBuilds:
         before = [v for k, v in known if k <= vt]
         return before[-1] if before else None
 
+    def on(self, loader: str, version: str) -> list[str]:
+        """The MSL builds a loader can load on a Minecraft version (a Quilt player runs
+        the Fabric build)."""
+        want = "fabric" if loader == "quilt" else loader
+        return [b["version"] for b in self.builds if b["loader"] == want and version in b["mc"]]
+
+    def per_loader(self, version: str, declared) -> list[tuple[str, list[str], list[str]]]:
+        """``(where, builds on this version, the ones its predicate accepts)`` for each
+        loader file that has builds here."""
+        out = []
+        for loader, spec, where in getattr(declared, "specs", None) or []:
+            avail = self.on(loader, version)
+            if avail:
+                out.append((where, avail, [b for b in avail if accepts(loader, spec, b)]))
+        return out
+
     def effective(self, version: str, declared: tuple[int, ...] | None) -> tuple[int, ...] | None:
-        """The oldest MSL a player can run this mod with on ``version``."""
+        """The oldest MSL a player can run this mod with on ``version``: of the builds
+        each loader file accepts there, as that loader reads its predicate, the oldest."""
+        loaders = self.per_loader(version, declared)
+        if loaders:
+            ok = [_semver(b) for _, _, acc in loaders for b in acc]
+            return min(ok) if ok else None
         oldest = self.oldest_build(version)
         if declared is None:
             return oldest
         if oldest is None:
-            return declared
-        return max(declared, oldest)
+            return tuple(declared)
+        return max(tuple(declared), oldest)
+
+    def refused(self, version: str, declared) -> list[str]:
+        """The loader files that accept no MSL build on ``version`` although there are
+        some: no player on that loader can run the mod there."""
+        return [where for where, _avail, acc in self.per_loader(version, declared) if not acc]
+
+    def passed_over(self, version: str, declared) -> list[tuple[str, str]]:
+        """``(where, named release)`` for a Fabric or Quilt predicate whose own named
+        release is on this version only as pre-release builds it rejects (``>=1.1.0``
+        against 1.1.0-1.20-1.20.4): almost always meant as ``>=1.1.0-0``."""
+        out = []
+        for loader, spec, where in getattr(declared, "specs", None) or []:
+            if loader not in ("fabric", "quilt"):
+                continue
+            floor = range_floor(spec)
+            named = [b for b in self.on(loader, version) if floor and _semver(b) == floor]
+            if named and not any(accepts(loader, spec, b) for b in named):
+                out.append((where, fmt(floor)))
+        return out
 
     def applies(self, feature: str, version: str, declared: tuple[int, ...] | None) -> tuple[bool, bool]:
         """``(in this version's window, guaranteed by the MSL the mod allows)``."""
@@ -315,7 +493,7 @@ class MslBuilds:
 
 
 def fmt(v: tuple[int, ...] | None) -> str:
-    return "any version" if v in (None, (0, 0, 0)) else ".".join(str(x) for x in v)
+    return "any version" if v is None or tuple(v) == (0, 0, 0) else ".".join(str(x) for x in v)
 
 
 def requires_msl(resources_root) -> bool:
