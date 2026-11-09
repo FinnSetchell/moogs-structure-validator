@@ -361,18 +361,23 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                 msl_short_warns.append(name)
         # Each loader file read the way its loader reads it, against the MSL builds that
         # loader can load: Fabric orders "1.1.0-1.20-1.20.4" below 1.1.0.
-        refused: dict[str, list[str]] = defaultdict(list)
+        refused: dict[tuple[tuple[str, ...], bool], list[str]] = defaultdict(list)
         passed: dict[tuple[str, str], list[str]] = defaultdict(list)
         for v in checkable:
-            for where in builds.refused(v, msl_min):
-                refused[where].append(v)
+            r = tuple(builds.refused(v, msl_min))
+            if r:
+                every = len(r) == len(builds.per_loader(v, msl_min))
+                refused[(r, every)].append(v)
             for where, named in builds.passed_over(v, msl_min):
                 passed[(where, named)].append(v)
-        for where, vs in sorted(refused.items()):
-            sample = builds.on(next((lo for lo, _s, w in msl_min.specs if w == where), "fabric"), vs[0])[:3]
-            print(f"  [ERROR] on {_ranges(vs, order)} {where} accepts no MSL build (there: "
-                  f"{', '.join(sample)}{' ...' if len(sample) == 3 else ''}), so no player on that loader can "
-                  f"run the mod there")
+        loader_of = {w: lo for lo, _s, w in getattr(msl_min, "specs", [])}
+        for (wheres, every), vs in sorted(refused.items()):
+            newest = max((msl_upgrade._semver(b) for v in vs for w in wheres for b in builds.on(loader_of[w], v)),
+                         default=None)
+            print(f"  [ERROR] on {_ranges(vs, order)} {', '.join(wheres)} accept{'s' if len(wheres) == 1 else ''} "
+                  f"no MSL build published there (the newest is {msl_upgrade.fmt(newest)}), so no player"
+                  f"{'' if every else ' on ' + ('that loader' if len(wheres) == 1 else 'those loaders')} can run "
+                  f"the mod there")
             msl_refused.append(vs)
         for (where, named), vs in sorted(passed.items()):
             print(f"  [WARN] on {_ranges(vs, order)} {where} rejects the MSL {named} builds there: Fabric orders "

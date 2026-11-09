@@ -1013,3 +1013,19 @@ def test_a_minimum_that_passes_over_its_own_release_warns(tmp_path, stubbed, cap
     assert passed and "warning" in summary, out
     assert "fabric.mod.json `>=1.1.0` rejects the MSL 1.1.0 builds there" in out
     assert "Write `>=1.1.0-0` to accept them" in out
+
+
+
+def test_loader_files_that_meet_no_build_are_one_error_naming_the_newest(tmp_path, stubbed, capsys):
+    # MSL 3.1.2 and later stop at 1.21.8 on one line and start at 1.21.10 on the next,
+    # so a mod asking for 3.3.0 has nothing to run with on 1.21.9 (1.21.4 here stands in).
+    root = _fabric_dep(tmp_path, ">=9.0.0")
+    res = root / "src" / "main" / "resources"
+    _write(res / "quilt.mod.json", {"quilt_loader": {"id": "test", "depends": [
+        {"id": "moogs_structures", "versions": ">=9.0.0"}]}})
+    passed, summary = _run(root, ["1.21.4"])
+    out = capsys.readouterr().out
+    assert not passed and "1 error(s)" in summary, out
+    assert ("[ERROR] on 1.21.4 fabric.mod.json `>=9.0.0`, quilt.mod.json `>=9.0.0` accept no MSL build published "
+            "there (the newest is ") in out
+    assert "so no player can run the mod there" in out
