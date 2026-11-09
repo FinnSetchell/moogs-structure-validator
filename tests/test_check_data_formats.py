@@ -1123,3 +1123,43 @@ def test_the_converter_puts_the_map_steps_around_exploration_map():
     assert got[0]["item"] == "minecraft:buried_treasure_map"
     plain = conv.entry_function_list({"type": "minecraft:item", "name": "minecraft:compass"}, [MAP_OLD])
     assert plain["type"] == "minecraft:exploration_map"
+
+
+# --- what a 26.3 modifier can be ------------------------------------------------------------
+# A function, a list of functions or an item modifier id: a number or a boolean is none of
+# them, alone or in a list, and 26.3 rejects the file (JsonOps reads no number as a string).
+
+SET2 = {"type": "minecraft:set_count", "count": 2}
+
+
+@pytest.mark.parametrize("modifier, at, found", [
+    (5, "modifier", "a number"),
+    (True, "modifier", "a boolean"),
+    ([5], "modifier[0]", "a number"),
+    ([SET2, 5], "modifier[1]", "a number"),
+])
+def test_a_26_3_modifier_that_is_no_function_or_id_fails_on_26_3(tmp_path, stubbed, capsys, modifier, at, found):
+    entry = {"type": "minecraft:item", "name": "minecraft:diamond", "modifier": modifier}
+    root = _project(tmp_path, {"data/test/loot_table/t.json": _table(entry)})
+    passed, summary = _run(root, ["26.3"])
+    out = capsys.readouterr().out
+    assert not passed and "1 error(s) on 26.3" in summary, out
+    assert f"is read here, found {found}" in out and "an id" in out, out
+    assert f"at pools[0].entries[0].{at}" in out, out
+
+
+def test_a_number_beside_a_good_old_form_fails_on_26_3_itself(tmp_path, stubbed, capsys):
+    entry = {"type": "minecraft:item", "name": "minecraft:diamond",
+             "functions": [{"function": "minecraft:set_count", "count": 2}], "modifier": [SET2, 7]}
+    root = _project(tmp_path, {"data/test/loot_table/t.json": _table(entry)})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed and "on 26.3: an id or an object is read here, found a number" in out, out
+
+
+def test_a_condition_or_modifier_named_by_id_still_passes(tmp_path, stubbed, capsys):
+    entry = {"type": "minecraft:item", "name": "minecraft:diamond", "modifier": ["test:extra", SET2],
+             "condition": "test:sometimes"}
+    root = _project(tmp_path, {"data/test/loot_table/t.json": _table(entry)})
+    passed, _ = _run(root, ["26.3"])
+    assert passed, capsys.readouterr().out

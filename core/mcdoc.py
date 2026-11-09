@@ -528,7 +528,12 @@ class Reader:
                 out.append(Finding(path, "shape", detail=f"a string is read here, found {_kind_name(value)}"))
                 return
             spec = _id_spec(t) or _id_spec(t0)
-            if spec is not None and isinstance(value, str):
+            if spec is not None and not isinstance(value, str):
+                # The game reads data JSON with JsonOps, whose strings take no number or
+                # boolean; and no registry holds an id that is one.
+                out.append(Finding(path, "shape", detail=f"an id is read here, found {_kind_name(value)}"))
+                return
+            if spec is not None:
                 self.check_id(value, spec, path, out)
             return
         if kind in ("int", "long", "short", "byte", "float", "double", "boolean"):
@@ -583,6 +588,7 @@ class Reader:
             return
         best: list[Finding] | None = None
         best_score = None
+        heads: list[str] | None = []
         # Every version's members (and those of any union this one sits in), to
         # recognise another version's form of the value.
         everyone = list(t.get("members", [])) + list(siblings or [])
@@ -596,6 +602,16 @@ class Reader:
                 best, best_score = trial, score
                 if score == (0, 0, 0):
                     break
+            # What this member reads, when the value is not that kind of thing at all.
+            said = _READ_HERE.match(trial[0].detail) if len(trial) == 1 and trial[0].path == path \
+                and trial[0].code == "shape" else None
+            heads = heads + [said.group(1)] if heads is not None and said else None
+        if heads and best_score and best_score[0] and len(heads) == len(members) > 1:
+            # The value fits none of them: name every choice, not only the first.
+            parts = list(dict.fromkeys(p for h in heads for p in re.split(r", | or ", h)))
+            found = _READ_HERE.match(best[0].detail).group(2)
+            what = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " or " + parts[-1]
+            best = [Finding(path, "shape", detail=f"{what} is read here, found {found}")]
         out.extend(best or [])
 
     def _check_struct(self, value, t, env, frames, path, out, siblings=None) -> None:
@@ -811,6 +827,9 @@ def _object_type(value: dict) -> str | None:
         if isinstance(v, str) and v:
             return normalize_id(v)
     return None
+
+
+_READ_HERE = re.compile(r"^(.*) is read here, found (.*)$")
 
 
 def _kind_name(value) -> str:

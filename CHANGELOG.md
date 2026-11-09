@@ -26,6 +26,7 @@
 
 ### Changed
 - A claim naming a release the cached version index does not know refetches the index, and fails if the release is still unknown, instead of quietly shortening the range.
+- **A number or a boolean where an id is read is an error.** The game reads data JSON with JsonOps, whose strings take neither, and no registry holds such an id. On 26.3 that catches a `modifier` or `condition` of `5`, `[5]`, or a list with a number after a real function, which passed before when the file had no old form beside it. A value that fits none of a field's choices names them all ("an object, an id or a list is read here, found a number").
 
 ## v1.12.0 -- 2026-09-24
 
