@@ -854,7 +854,7 @@ def blank_maps(table) -> list[tuple[str, str]]:
                     dest = f.get("destination")
                     item = map_item_for(dest)
                     out.append((f"{path}.modifier", (
-                        "on 26.3 exploration_map writes the map onto the item it is given and no longer turns "
+                        "exploration_map writes the map onto the item it is given and no longer turns "
                         "minecraft:map into a filled map, so this gives a blank map. In the 26.3 form, set the "
                         f"item first (set_item {item or 'a map item'}"
                         f"{', the one vanilla uses for ' + str(dest) if item else ''}) and keep only filled "
