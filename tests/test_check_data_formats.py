@@ -1180,3 +1180,77 @@ def test_a_condition_or_modifier_named_by_id_still_passes(tmp_path, stubbed, cap
     root = _project(tmp_path, {"data/test/loot_table/t.json": _table(entry)})
     passed, _ = _run(root, ["26.3"])
     assert passed, capsys.readouterr().out
+
+
+# --- treasure maps on a pool or the whole table, and maps by chance -------------------------
+# R2's planted pool: exploration_map on the pool, a plain minecraft:map entry under it.
+
+PLAIN_MAP = {"type": "minecraft:item", "name": "minecraft:map"}
+CHANCE_OLD = [{"condition": "minecraft:random_chance", "chance": 0.5}]
+CHANCE_NEW = {"type": "minecraft:random_chance", "chance": 0.5}
+
+
+def test_a_pool_level_map_on_a_plain_map_is_blank_on_26_3(tmp_path, stubbed, map_tags, capsys):
+    table = {"pools": [{"rolls": 1, "functions": [MAP_OLD], "modifier": MAP_NEW, "entries": [PLAIN_MAP]}]}
+    root = _project(tmp_path, {"data/test/loot_table/t.json": table})
+    passed, summary = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed and "1 error(s) on 26.3" in summary, out
+    assert "this exploration_map runs on the plain minecraft:map from pools[0].entries[0]" in out, out
+    assert "Move it onto the map entry" in out and "set_item minecraft:buried_treasure_map" in out, out
+    assert "at pools[0].modifier" in out, out
+
+
+def test_a_table_level_map_on_a_plain_map_is_blank_on_26_3(tmp_path, stubbed, map_tags, capsys):
+    pool = {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:diamond"}, PLAIN_MAP]}
+    table = {"functions": [MAP_OLD], "modifier": MAP_NEW, "pools": [pool]}
+    root = _project(tmp_path, {"data/test/loot_table/t.json": table})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed and "the plain minecraft:map from pools[0].entries[1]" in out, out
+    assert "\n        at modifier\n" in out, out
+
+
+def test_a_pool_level_map_on_an_entry_that_sets_its_map_item_passes(tmp_path, stubbed, map_tags, capsys):
+    entry = dict(PLAIN_MAP, modifier=SET_TREASURE)
+    table = {"pools": [{"rolls": 1, "modifier": [MAP_NEW, KEEP_FILLED], "entries": [entry]}]}
+    root = _project(tmp_path, {"data/test/loot_table/t.json": table})
+    passed, _ = _run(root, ["26.3"])
+    assert passed, capsys.readouterr().out
+
+
+def test_a_map_by_chance_no_longer_gives_the_empty_map_on_26_3(tmp_path, stubbed, map_tags, capsys):
+    # Before 26.3 a failed chance leaves a plain empty map; the 26.3 form has already set
+    # the map item, so the filter throws it away and the entry gives nothing.
+    old = dict(MAP_OLD, conditions=CHANCE_OLD)
+    new = [SET_TREASURE, dict(MAP_NEW, condition=CHANCE_NEW), KEEP_FILLED]
+    root = _project(tmp_path, {"data/test/loot_table/t.json": _table(_map_entry(new, functions=[old]))})
+    passed, summary = _run(root, ["26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed and "1 error(s) on 26.3" in summary, out
+    assert "this exploration_map has a condition" in out and "a failed condition gives nothing: the filter after it throws" in out, out
+    assert "Put the condition on the entry instead" in out, out
+    # with the chance on the entry, both forms give a filled map or nothing
+    entry = dict(_map_entry([SET_TREASURE, MAP_NEW, KEEP_FILLED]), conditions=CHANCE_OLD, condition=CHANCE_NEW)
+    root = _project(tmp_path / "moved", {"data/test/loot_table/t.json": _table(entry)})
+    passed, _ = _run(root, ["26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+
+
+def test_blank_maps_follow_the_items_through_each_level():
+    from core.loot_forms import blank_maps
+    inner = {"pools": [{"rolls": 1, "entries": [PLAIN_MAP]}]}
+    nested = {"pools": [{"rolls": 1, "modifier": MAP_NEW, "entries": [
+        {"type": "minecraft:alternatives", "children": [{"type": "minecraft:loot_table", "value": inner}]}]}]}
+    assert [w for w, _ in blank_maps(nested)] == ["pools[0].modifier"]
+    said_once = {"pools": [{"rolls": 1, "modifier": MAP_NEW, "entries": [dict(PLAIN_MAP, modifier=MAP_NEW)]}]}
+    assert [w for w, _ in blank_maps(said_once)] == ["pools[0].entries[0].modifier"]
+    compass = {"pools": [{"rolls": 1, "modifier": MAP_NEW,
+                          "entries": [{"type": "minecraft:item", "name": "minecraft:compass"}]}]}
+    assert blank_maps(compass) == []
+    unfiltered = {"pools": [{"rolls": 1, "entries": [dict(PLAIN_MAP, modifier=[
+        SET_TREASURE, dict(MAP_NEW, condition=CHANCE_NEW)])]}]}
+    assert "a map item with no map on it" in blank_maps(unfiltered)[0][1]
+    by_chance_on_the_pool = {"pools": [{"rolls": 1, "modifier": [dict(MAP_NEW, condition=CHANCE_NEW), KEEP_FILLED],
+                                        "entries": [dict(PLAIN_MAP, modifier=SET_TREASURE)]}]}
+    assert [w for w, m in blank_maps(by_chance_on_the_pool) if "has a condition" in m] == ["pools[0].modifier"]

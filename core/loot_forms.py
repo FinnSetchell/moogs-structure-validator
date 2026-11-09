@@ -837,44 +837,95 @@ def _compare(new_key: str, old_key: str, expected, actual, path, out) -> None:
 # --- 26.3 map entries -----------------------------------------------------------------------
 
 def blank_maps(table) -> list[tuple[str, str]]:
-    """``(path, message)`` for each plain ``minecraft:map`` entry whose 26.3 form runs
-    exploration_map with no map item set before it: a blank map on 26.3."""
+    """``(path, message)`` for each 26.3 ``exploration_map`` that runs on a plain
+    ``minecraft:map``, wherever it sits (on the entry, its pool or the table): a blank
+    map on 26.3. And for one with a condition on a map the 26.3 form gave its map item
+    first: a failed condition there no longer leaves the plain map 26.2 gave.
+
+    The items are followed as the game runs the steps: an entry's own modifier, then its
+    pool's, then the table's. ``plain`` are the entries whose item is still a plain map,
+    ``was`` those a ``set_item`` turned from one into a map item."""
     out: list[tuple[str, str]] = []
 
+    def run(steps, plain, was, where, own):
+        for i, f in enumerate(steps):
+            kind = _kind(f)
+            if kind == "set_item" and isinstance(f.get("item"), str):
+                item = _ns(f["item"])
+                if is_map_item(item):
+                    plain, was = [], was + plain
+                else:
+                    plain, was = ([own] if item == "minecraft:map" else []), []
+            elif kind == "exploration_map":
+                if plain:
+                    out.append((where, _blank_message(f, plain, own)))
+                elif was and f.get("condition") is not None:
+                    filtered = any(_kind(g) == "filtered" for g in steps[i + 1:])
+                    out.append((where, _chance_message(filtered)))
+                plain, was = [], []   # said once, where the map function runs
+        return plain, was
+
     def entry(e, path):
+        """(plain, was) for what this entry hands its pool."""
         if not isinstance(e, dict):
-            return
-        if _plain_map_entry(e) and "modifier" in e:
-            has_item = False
-            for f in _steps(e["modifier"]):
-                kind = _kind(f)
-                if kind == "set_item" and is_map_item(f.get("item")):
-                    has_item = True
-                if kind == "exploration_map" and not has_item:
-                    dest = f.get("destination")
-                    item = map_item_for(dest)
-                    out.append((f"{path}.modifier", (
-                        "exploration_map writes the map onto the item it is given and no longer turns "
-                        "minecraft:map into a filled map, so this gives a blank map. In the 26.3 form, set the "
-                        f"item first (set_item {item or 'a map item'}"
-                        f"{', the one vanilla uses for ' + str(dest) if item else ''}) and keep only filled "
-                        "maps after it (filtered on minecraft:map_id, on_fail discard), as vanilla 26.3 does")))
-                    break
+            return [], []
+        plain: list[str] = []
+        was: list[str] = []
         for k, c in enumerate(_list(e.get("children"))):
-            entry(c, f"{path}.children[{k}]")
-        if _short(e.get("type")) == "loot_table" and isinstance(e.get("value"), dict):
-            table_(e["value"], f"{path}.value")
-        for i, f in enumerate(_steps(e.get("modifier"))):
+            p, w = entry(c, f"{path}.children[{k}]")
+            plain, was = plain + p, was + w
+        kind = _short(_ns(e.get("type")))
+        if kind == "item" and isinstance(e.get("name"), str) and _ns(e["name"]) == "minecraft:map":
+            plain = [path]
+        elif kind == "loot_table" and isinstance(e.get("value"), dict):
+            plain, was = table_(e["value"], f"{path}.value")
+        steps = _steps(e.get("modifier"))
+        for i, f in enumerate(steps):
             if _kind(f) == "set_contents":
                 for j, x in enumerate(_list(f.get("entries"))):
-                    entry(x, f"{path}.modifier[{i}].entries[{j}]")
+                    entry(x, f"{path}.modifier[{i}].entries[{j}]")   # inside a container
+        if kind in ("item", "loot_table"):
+            plain, was = run(steps, plain, was, f"{path}.modifier", path)
+        return plain, was
 
     def table_(t, path):
+        plain: list[str] = []
+        was: list[str] = []
         for i, p in enumerate(_list(t.get("pools"))):
-            if isinstance(p, dict):
-                for j, e in enumerate(_list(p.get("entries"))):
-                    entry(e, f"{_join(path, 'pools')}[{i}].entries[{j}]")
+            if not isinstance(p, dict):
+                continue
+            pp = f"{_join(path, 'pools')}[{i}]"
+            pl: list[str] = []
+            pw: list[str] = []
+            for j, e in enumerate(_list(p.get("entries"))):
+                a, b = entry(e, f"{pp}.entries[{j}]")
+                pl, pw = pl + a, pw + b
+            a, b = run(_steps(p.get("modifier")), pl, pw, f"{pp}.modifier", pp)
+            plain, was = plain + a, was + b
+        return run(_steps(t.get("modifier")), plain, was, _join(path, "modifier"), path or "the table")
 
     if isinstance(table, dict):
         table_(table, "")
     return out
+
+
+def _blank_message(f, plain: list[str], own: str) -> str:
+    dest = f.get("destination")
+    item = map_item_for(dest)
+    steps = (f"set the item first (set_item {item or 'a map item'}"
+             f"{', the one vanilla uses for ' + str(dest) if item else ''}) and keep only filled maps after it "
+             "(filtered on minecraft:map_id, on_fail discard), as vanilla 26.3 does")
+    why = "exploration_map writes the map onto the item it is given and no longer turns minecraft:map into a filled map"
+    if plain == [own]:
+        return f"{why}, so this gives a blank map. In the 26.3 form, {steps}"
+    which = ", ".join(plain[:3]) + (f" and {len(plain) - 3} more" if len(plain) > 3 else "")
+    return (f"this exploration_map runs on the plain minecraft:map from {which}, and {why[len('exploration_map '):]}, "
+            f"so that gives a blank map. Move it onto the map entry and, in its 26.3 form, {steps}")
+
+
+def _chance_message(filtered: bool) -> str:
+    lost = ("nothing: the filter after it throws the unfilled map away" if filtered
+            else "a map item with no map on it")
+    return ("this exploration_map has a condition. Before 26.3 a failed condition leaves the plain minecraft:map "
+            f"as an empty map, but the 26.3 form sets the map item first, so there a failed condition gives {lost}. "
+            "Put the condition on the entry instead, in both forms, so both give a filled map or nothing")
