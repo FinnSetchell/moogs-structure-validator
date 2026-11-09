@@ -744,23 +744,36 @@ def _block_entity_pack(tmp_path, monkeypatch, entries: list[tuple[str, Compound]
     return root
 
 
-def _container(block_id: str, with_components: bool) -> tuple[str, Compound]:
+def _container(block_id: str, with_components: bool, content: bool = False) -> tuple[str, Compound]:
     be = Compound({"id": String(block_id)})
     if with_components:
-        be["components"] = Compound({})
+        be["components"] = Compound({"minecraft:custom_name": String('"Loot"')} if content else {})
     return block_id, be
 
 
-def test_components_key_below_1_20_5_fails(tmp_path, monkeypatch):
-    """The key does not exist before 1.20.5, so a file floored below it must not
-    carry one on any block entity."""
+def test_components_with_content_below_1_20_5_fails(tmp_path, monkeypatch):
+    """The key does not exist before 1.20.5: those versions skip it, so what it
+    carries is lost there."""
     root = _block_entity_pack(tmp_path, monkeypatch,
-                              [_container("minecraft:chest", True)], "1.20-1.20.4", 3700)
+                              [_container("minecraft:chest", True, content=True)], "1.20-1.20.4", 3700)
 
     from checks import check_block_entity_components as mod
     ctx = FakeContext("test", ["1.20", "1.20.4"], root)
     passed, _ = mod.run(ctx)
     assert not passed
+
+
+def test_empty_components_below_1_20_5_warns(tmp_path, monkeypatch, capsys):
+    """An empty `components {}` carries nothing, so skipping it loses nothing (MBS 1.20)."""
+    root = _block_entity_pack(tmp_path, monkeypatch,
+                              [_container("minecraft:chest", True)], "1.20-1.20.4", 3700)
+
+    from checks import check_block_entity_components as mod
+    ctx = FakeContext("test", ["1.20", "1.20.4"], root)
+    passed, summary = mod.run(ctx)
+    out = capsys.readouterr().out
+    assert passed and "warning" in summary, out
+    assert "[WARN] 1 file(s) floored below 1.20.5 have 1 block entities with an empty `components` {}" in out
 
 
 def test_no_components_key_below_1_20_5_passes(tmp_path, monkeypatch):
@@ -826,7 +839,7 @@ def test_mixed_presence_above_1_20_5_passes(tmp_path, monkeypatch):
 def test_pre_1_20_5_rule_still_applies_to_every_block_entity(tmp_path, monkeypatch):
     """The surviving direction is not sign-specific: a barrel trips it too."""
     root = _block_entity_pack(tmp_path, monkeypatch, [
-        _container("minecraft:barrel", True),
+        _container("minecraft:barrel", True, content=True),
     ], "1.20-1.20.4", 3700)
 
     from checks import check_block_entity_components as mod
@@ -836,7 +849,7 @@ def test_pre_1_20_5_rule_still_applies_to_every_block_entity(tmp_path, monkeypat
     assert "components" in summary
 
 
-def _json_sign(with_components: bool) -> tuple[str, Compound]:
+def _json_sign(with_components: bool, content: bool = False) -> tuple[str, Compound]:
     """A pre-1.20.5 sign: JSON-encoded messages, optionally carrying the 1.20.5+ key."""
     sign = Compound({
         "id": String("minecraft:oak_sign"),
@@ -845,13 +858,13 @@ def _json_sign(with_components: bool) -> tuple[str, Compound]:
         }),
     })
     if with_components:
-        sign["components"] = Compound({})
+        sign["components"] = Compound({"minecraft:custom_name": String('"Sign"')} if content else {})
     return "minecraft:oak_sign", sign
 
 
 def test_sign_components_key_now_reported_by_the_general_check(tmp_path, monkeypatch):
     root = _block_entity_pack(tmp_path, monkeypatch,
-                              [_json_sign(with_components=True)], "1.20-1.20.4", 3700)
+                              [_json_sign(with_components=True, content=True)], "1.20-1.20.4", 3700)
 
     from checks import check_block_entity_components as mod
     ctx = FakeContext("test", ["1.20", "1.20.4"], root)
@@ -862,7 +875,7 @@ def test_sign_components_key_now_reported_by_the_general_check(tmp_path, monkeyp
 def test_non_sign_block_entity_components_key_is_reported_too(tmp_path, monkeypatch):
     """The gap this closes: before, only signs were considered at all."""
     root = _block_entity_pack(tmp_path, monkeypatch,
-                              [_container("minecraft:barrel", True)], "1.20-1.20.4", 3700)
+                              [_container("minecraft:barrel", True, content=True)], "1.20-1.20.4", 3700)
 
     from checks import check_block_entity_components as mod
     ctx = FakeContext("test", ["1.20", "1.20.4"], root)

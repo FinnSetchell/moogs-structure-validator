@@ -1,7 +1,9 @@
 """A block entity must not carry a ``components`` key before 1.20.5.
 
 The key arrived at 1.20.5, so a file whose minimum covered version is below that
-cannot carry one on any block entity.
+cannot carry one on any block entity: those versions skip it, and whatever it
+carries (items, a name, a lock) is lost there. An empty ``components {}`` carries
+nothing, so nothing is lost: it only warns.
 
 The inverse -- "at 1.20.5+ every block entity must carry the key" -- is
 deliberately NOT checked, because vanilla does not work that way. Across the
@@ -50,6 +52,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
     errors: list[str] = []
     files_with_errors: set[Path] = set()
+    empty_files: list[str] = []
+    empty_count = 0
     files_checked = 0
     block_entities_checked = 0
 
@@ -70,10 +74,18 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         files_checked += 1
         names = structure.palette_names()
         offenders: list[str] = []
+        empty = 0
         for be in structure.block_entities:
             block_entities_checked += 1
             if predates_components and "components" in be.nbt:
+                comp = be.nbt["components"]
+                if hasattr(comp, "__len__") and len(comp) == 0:
+                    empty += 1
+                    continue
                 offenders.append(names[be.state] if 0 <= be.state < len(names) else "?")
+        if empty:
+            empty_files.append(rel)
+            empty_count += empty
 
         if not offenders:
             continue
@@ -86,6 +98,12 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
     for msg in errors:
         print(f"  {msg}")
+    if empty_files:
+        shown = ", ".join(str(f) for f in sorted(empty_files)[:5])
+        more = f" (+ {len(empty_files) - 5} more)" if len(empty_files) > 5 else ""
+        print(f"  [WARN] {len(empty_files)} file(s) floored below 1.20.5 have {empty_count} block entities with an"
+              f" empty `components` {{}}: those versions skip the key, and an empty one carries nothing, so"
+              f" nothing is lost. {shown}{more}")
 
     if errors:
         return False, (
@@ -93,6 +111,10 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             f" pre-1.20.5 `components` key"
         )
 
-    print(f"  {files_checked} file(s), {block_entities_checked} block entities"
-          f" checked -- all valid")
-    return True, f"{files_checked} files, {block_entities_checked} block entities checked"
+    if not empty_files:
+        print(f"  {files_checked} file(s), {block_entities_checked} block entities"
+              f" checked -- all valid")
+    summary = f"{files_checked} files, {block_entities_checked} block entities checked"
+    if empty_files:
+        summary += f", {len(empty_files)} with an empty `components` (warning)"
+    return True, summary
