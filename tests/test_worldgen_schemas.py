@@ -278,6 +278,14 @@ def test_follow_floor_and_rail_slope_processors_pass(tmp_path):
     assert passed
 
 
+def test_rail_rotation_processor_passes(tmp_path):
+    # MSL 3.5.0, MapCodec.unit: MSL adds it to its own structures, and a pool may list it.
+    proc = {"processor_type": "moogs_structures:rail_rotation_processor"}
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.20.1", "1.21.1"], tmp_path))
+    assert passed
+
+
 def test_follow_floor_search_range_out_of_range_fails(tmp_path, capsys):
     # MSL reads a value outside 1-64 as 16 without a word, so it is an error here.
     for bad, why in ((0, "less than the minimum of 1"), (65, "greater than the maximum of 64")):
