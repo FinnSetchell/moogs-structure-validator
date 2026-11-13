@@ -266,6 +266,37 @@ def test_unknown_msl_processor_type_fails(tmp_path):
     assert not passed
 
 
+# MSL 3.5.0: follow_floor_processor (search_range Codec.intRange(1, 64), default 16;
+# offset an int, default 0) and rail_slope_processor (no fields).
+def test_follow_floor_and_rail_slope_processors_pass(tmp_path):
+    procs = [{"processor_type": "moogs_structures:follow_floor_processor"},
+             {"processor_type": "moogs_structures:follow_floor_processor", "search_range": 64, "offset": -2},
+             {"processor_type": "moogs_structures:follow_floor_processor", "search_range": 1},
+             {"processor_type": "moogs_structures:rail_slope_processor"}]
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list(procs))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
+def test_follow_floor_search_range_out_of_range_fails(tmp_path, capsys):
+    # MSL reads a value outside 1-64 as 16 without a word, so it is an error here.
+    for bad, why in ((0, "less than the minimum of 1"), (65, "greater than the maximum of 64")):
+        root = tmp_path / str(bad)
+        proc = {"processor_type": "moogs_structures:follow_floor_processor", "search_range": bad}
+        _write(root, "test", "processor_list", "p.json", _processor_list([proc]))
+        passed, _ = mod.run(FakeContext("test", ["1.21"], root))
+        out = capsys.readouterr().out
+        assert not passed, out
+        assert "p.json @ search_range" in out and why in out, out
+
+
+def test_follow_floor_offset_must_be_a_whole_number(tmp_path):
+    proc = {"processor_type": "moogs_structures:follow_floor_processor", "offset": 1.5}
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
 def test_pillar_processor_valid_passes(tmp_path):
     proc = {
         "processor_type": "moogs_structures:pillar_processor",
