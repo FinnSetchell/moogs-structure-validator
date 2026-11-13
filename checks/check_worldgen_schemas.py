@@ -85,9 +85,11 @@ _MSL_TYPE_WINDOWS: dict[str, tuple[int | None, int | None]] = {
 # `git grep` on every tag) and its CHANGELOG. 3.0.0 added the processors (first
 # tags 1.21.1-3.0.0-alpha.1 and 1.20.4-3.0.0-alpha.2; trial spawner and vault in
 # commit 02c2aed), 3.1.0 the replace-vanilla processor and placement, 3.1.2 the
-# hanging entity anchor. MSL 1.x is not tagged, so it was read from the published
-# jars themselves (the registration classes' string constants of 1.0.0, 1.0.1, 1.0.2
-# and 1.1.0 builds, on Fabric, Forge and NeoForge): every type in tag v2.0.0 is in
+# hanging entity anchor, 3.5.0 the follow floor and rail slope processors (from their
+# branches, follow-floor-processor and rail-slope-processor). MSL 1.x is not tagged,
+# so it was read from the published jars themselves (the registration classes'
+# string constants of 1.0.0, 1.0.1, 1.0.2 and 1.1.0 builds, on Fabric, Forge and
+# NeoForge): every type in tag v2.0.0 is in
 # 1.0.0 except versioned_single_pool_element, first in 1.1.0 (git: added 2025-11-11,
 # after 1.0.2 shipped). Types not listed are in MSL 1.0.0, the first release.
 _MSL_TYPE_SINCE: dict[str, tuple[int, int, int]] = {
@@ -105,6 +107,8 @@ _MSL_TYPE_SINCE: dict[str, tuple[int, int, int]] = {
     "moogs_structures:vanilla_loot_swap_processor": (3, 1, 0),
     "moogs_structures:conditional_concentric_rings": (3, 1, 0),
     "moogs_structures:hanging_entity_anchor_processor": (3, 1, 2),
+    "moogs_structures:follow_floor_processor": (3, 5, 0),
+    "moogs_structures:rail_slope_processor": (3, 5, 0),
 }
 
 # Fields MSL added to a type after the type itself: the first release whose codec

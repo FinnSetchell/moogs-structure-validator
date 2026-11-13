@@ -294,5 +294,31 @@
       },
       "probability": { "type": "number", "minimum": 0, "maximum": 1 }
     }
+  },
+
+  "moogs_structures:follow_floor_processor": {
+    "type": "object",
+    "description": "MSL 3.5.0+. Moves each column of a piece onto the floor found near its placement height, so it follows the ground under the Nether roof, in caves and under overhangs. Both fields use orElse: a value out of range is read as the default without a word.",
+    "required": ["processor_type"],
+    "properties": {
+      "processor_type": { "type": "string" },
+      "search_range": {
+        "type": "integer", "minimum": 1, "maximum": 64,
+        "description": "How far each column looks up or down for its floor (Codec.intRange(1, 64)). Default 16."
+      },
+      "offset": {
+        "type": "integer",
+        "description": "Blocks added to the height of the floor found. Default 0."
+      }
+    }
+  },
+
+  "moogs_structures:rail_slope_processor": {
+    "type": "object",
+    "description": "MSL 3.5.0+. Lets rails on terrain-matched pieces slope with the ground. MapCodec.unit: no fields.",
+    "required": ["processor_type"],
+    "properties": {
+      "processor_type": { "type": "string" }
+    }
   }
 }
