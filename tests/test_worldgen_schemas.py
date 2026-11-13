@@ -297,6 +297,23 @@ def test_follow_floor_offset_must_be_a_whole_number(tmp_path):
     assert not passed
 
 
+ANCHOR = {"processor_type": "moogs_structures:hanging_entity_anchor_processor"}
+
+
+def test_hanging_entity_anchor_processor_passes(tmp_path):
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([ANCHOR]))
+    passed, _ = mod.run(FakeContext("test", ["1.20.1", "1.21.1"], tmp_path))
+    assert passed
+
+
+def test_hanging_entity_anchor_misspelled_fails(tmp_path, capsys):
+    proc = {"processor_type": "moogs_structures:hanging_entity_anchor"}
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    assert not passed
+    assert "unknown MSL processor type 'moogs_structures:hanging_entity_anchor'" in capsys.readouterr().out
+
+
 def test_pillar_processor_valid_passes(tmp_path):
     proc = {
         "processor_type": "moogs_structures:pillar_processor",

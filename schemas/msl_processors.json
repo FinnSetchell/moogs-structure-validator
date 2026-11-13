@@ -320,5 +320,14 @@
     "properties": {
       "processor_type": { "type": "string" }
     }
+  },
+
+  "moogs_structures:hanging_entity_anchor_processor": {
+    "type": "object",
+    "description": "MSL 3.1.2+. Writes the block an item frame, painting or leash knot hangs on (TileX/TileY/TileZ) at its placed position. MSL's own pool elements add it themselves; other pieces can list it. MapCodec.unit: no fields.",
+    "required": ["processor_type"],
+    "properties": {
+      "processor_type": { "type": "string" }
+    }
   }
 }

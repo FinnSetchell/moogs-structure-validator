@@ -4,7 +4,7 @@
 
 ### Added
 - `burying_type` on Nether structures: only `LOWEST_CORNER`, never with `FIXED_HEIGHT`
-- **MSL 3.5.0's processors.** `moogs_structures:follow_floor_processor` (`search_range` 1 to 64, default 16; `offset`, default 0) and `moogs_structures:rail_slope_processor` (no fields) are known, so processor lists using them no longer fail as unknown types. A `search_range` outside 1 to 64 is an error: MSL reads it as 16 without a word.
+- **MSL 3.5.0's processors.** `moogs_structures:follow_floor_processor` (`search_range` 1 to 64, default 16; `offset`, default 0) and `moogs_structures:rail_slope_processor` (no fields) are known, so processor lists using them no longer fail as unknown types. A `search_range` outside 1 to 64 is an error: MSL reads it as 16 without a word. MSL 3.1.2's `moogs_structures:hanging_entity_anchor_processor` (no fields) is known too.
 
 ## v1.12.0 -- 2026-09-24
 
