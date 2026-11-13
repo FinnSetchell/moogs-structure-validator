@@ -364,17 +364,21 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     if uses_msl:
         print(f"  Moog's Structure Lib: this mod allows {msl_upgrade.fmt(msl_min)} "
               f"({'; '.join(msl_sources)})")
-        for name, feat in builds.features.items():
-            what = feat["what"].split(" (")[0]
+        def runs(vs) -> list[str]:
             # Not where the mod accepts no MSL build at all: nothing runs there, as the
             # error below says.
-            ok = [v for v in sorted(msl_relied.get(name, ()), key=order.index)
-                  if builds.effective(v, msl_min) is not None or not builds.per_loader(v, msl_min)]
+            return [v for v in sorted(vs, key=order.index)
+                    if builds.effective(v, msl_min) is not None or not builds.per_loader(v, msl_min)]
+
+        for name, feat in builds.features.items():
+            what = feat["what"].split(" (")[0]
+            ok = runs(msl_relied.get(name, ()))
             if ok:
                 print(f"    on {_ranges(ok, order)} it runs with MSL "
                       f"{msl_upgrade.fmt(builds.effective(ok[0], msl_min))} or newer, which {what}")
-            if msl_short.get(name):
-                short = sorted(msl_short[name], key=order.index)
+            short = runs(msl_short.get(name, ()))
+            msl_short[name] = set(short)
+            if short:
                 print(f"  [ERROR] on {_ranges(short, order)} this mod allows MSL "
                       f"{msl_upgrade.fmt(builds.effective(short[0], msl_min))}, older than {feat['msl_from']}, "
                       f"the first that {what}, so the files are read without it there. Raise the "

@@ -299,6 +299,23 @@ def test_follow_floor_offset_must_be_a_whole_number(tmp_path):
     assert not passed
 
 
+ANCHOR = {"processor_type": "moogs_structures:hanging_entity_anchor_processor"}
+
+
+def test_hanging_entity_anchor_processor_passes(tmp_path):
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([ANCHOR]))
+    passed, _ = mod.run(FakeContext("test", ["1.20.1", "1.21.1"], tmp_path))
+    assert passed
+
+
+def test_hanging_entity_anchor_misspelled_fails(tmp_path, capsys):
+    proc = {"processor_type": "moogs_structures:hanging_entity_anchor"}
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    assert not passed
+    assert "unknown MSL processor type 'moogs_structures:hanging_entity_anchor'" in capsys.readouterr().out
+
+
 def test_pillar_processor_valid_passes(tmp_path):
     proc = {
         "processor_type": "moogs_structures:pillar_processor",
@@ -716,6 +733,21 @@ def test_the_msl_3_5_processors_need_msl_3_5_0(tmp_path, monkeypatch, capsys, pt
     _write(root, "test", "processor_list", "p.json", _processor_list([{"processor_type": f"moogs_structures:{ptype}"}]))
     _msl_mod(root, ">=3.5.0")
     passed, _ = mod.run(FakeContext("test", ["1.21", "1.21.1"], root))
+    assert passed, capsys.readouterr().out
+
+
+def test_the_hanging_entity_anchor_needs_msl_3_1_2(tmp_path, monkeypatch, capsys):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([ANCHOR]))
+    _msl_mod(tmp_path, ">=3.1.0")
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert "moogs_structures:hanging_entity_anchor_processor first shipped in MSL 3.1.2" in out, out
+    root = tmp_path / "min"
+    _write(root, "test", "processor_list", "p.json", _processor_list([ANCHOR]))
+    _msl_mod(root, ">=3.1.2")
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], root))
     assert passed, capsys.readouterr().out
 
 

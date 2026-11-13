@@ -424,6 +424,17 @@ def test_a_minimum_below_the_msl_that_reads_them_fails(tmp_path, stubbed, capsys
     assert "Raise the moogs_structures minimum to 3.0.0" in out
 
 
+def test_no_too_old_msl_error_where_no_build_the_mod_accepts_exists(tmp_path, stubbed, capsys):
+    # MNS 1.21 asking for an MSL not yet published: nothing runs on 1.21.1, which the
+    # refusal says. It is not "this mod allows MSL any version, older than 3.0.0".
+    root = _msl_project(tmp_path, {"data/test/trial_spawner/arena.json": TRIAL}, fabric=">=9.0.0")
+    passed, summary = _run(root, ["1.21.1"])
+    out = capsys.readouterr().out
+    assert not passed and "1 error(s)" in summary, out
+    assert "accepts no MSL build published there" in out, out
+    assert "this mod allows MSL" not in out, out
+
+
 def test_allowlisted_key_passes_and_the_same_key_elsewhere_does_not(tmp_path, stubbed, capsys):
     harmless = {"type": "minecraft:item", "name": "minecraft:book",
                 "functions": [{"function": "minecraft:enchant_with_levels", "levels": 5, "only_compatible": True}]}
