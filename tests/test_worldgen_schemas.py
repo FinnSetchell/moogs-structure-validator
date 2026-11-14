@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.nbt_helpers import FakeContext, stub_registries
 
 from checks import check_worldgen_schemas as mod
@@ -686,3 +688,60 @@ def test_advanced_random_spread_valid_passes(tmp_path):
     _write(tmp_path, "test", "structure_set", "s.json", data)
     passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
     assert passed
+
+
+# --- MSL 3.6.0 adaptation areas and "none" ---------------------------------------------
+
+def _area_element(**overrides) -> dict:
+    element = {"element_type": "moogs_structures:versioned_single_pool_element", "location": "test:start",
+               "projection": "rigid", "processors": "minecraft:empty",
+               "adaptation_area": {"columns": [{"x": [2, 5], "z": [0, 3]}], "outside_follows_ground": True}}
+    element.update(overrides)
+    return element
+
+
+def test_adaptation_areas_and_none_pass(tmp_path, capsys):
+    # Both ways of naming the columns, and "none" in every place MSL takes an adaptation.
+    _write(tmp_path, "test", "template_pool", "p.json", _pool([
+        _area_element(),
+        _area_element(adaptation_area={"footprint": {"layers": 2, "blocks": "#minecraft:logs", "margin": 1}},
+                      enhanced_terrain_adaptation="none"),
+        {"element_type": "moogs_structures:mirroring_single_pool_element", "location": "test:a",
+         "projection": "rigid", "mirror": "FRONT_BACK", "enhanced_terrain_adaptation": "none"},
+        {"element_type": "moogs_structures:legacy_ocean_bottom_single_pool_element", "location": "test:b",
+         "projection": "rigid", "enhanced_terrain_adaptation": "none"}]))
+    _write(tmp_path, "test", "structure", "s.json", _generic_structure(enhanced_terrain_adaptation="none"))
+    _write(tmp_path, "test", "structure", "n.json", _generic_structure(
+        type="moogs_structures:moogs_structures_generic_nether_jigsaw_structure",
+        land_search_direction="HIGHEST_LAND", enhanced_terrain_adaptation="none"))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    assert passed, capsys.readouterr().out
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"adaptation_area": {"columns": [{"x": [0, 1], "z": [0, 1]}], "footprint": {}}},
+     'needs exactly one of "columns" or "footprint"'),
+    ({"adaptation_area": {"outside_follows_ground": True}}, 'needs exactly one of "columns" or "footprint"'),
+    ({"adaptation_area": {"columns": [{"x": [5, 2], "z": [0, 3]}]}}, "and 5 is more than 2"),
+    ({"projection": "terrain_matching"}, 'needs "projection": "rigid"'),
+    ({"adaptation_area": {"columns": []}}, "should be non-empty"),
+    ({"adaptation_area": {"columns": [{"x": [1], "z": [0, 3]}]}}, "is too short"),
+    ({"adaptation_area": {"footprint": {"layers": 65}}}, "greater than the maximum of 64"),
+    ({"adaptation_area": {"footprint": {"margin": 17}}}, "greater than the maximum of 16"),
+    ({"adaptation_area": {"footprint": {"blocks": "minecraft:logs"}}}, "does not match"),
+    ({"enhanced_terrain_adaptation": "off"}, "'off' does not match '^none$'"),
+])
+def test_adaptation_area_shapes_msl_refuses_fail(tmp_path, capsys, change, message):
+    _write(tmp_path, "test", "template_pool", "p.json", _pool([_area_element(**change)]))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert message in out, out
+
+
+def test_terrain_adaptation_strings_other_than_none_fail_on_structures(tmp_path, capsys):
+    # The generic jigsaw's adaptation was not checked at all before; now it takes the same values.
+    _write(tmp_path, "test", "structure", "s.json", _generic_structure(enhanced_terrain_adaptation="carve"))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed and "'carve' does not match '^none$'" in out, out
