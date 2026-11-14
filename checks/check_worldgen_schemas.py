@@ -12,13 +12,16 @@ first shipped in a later MSL than the mod's declared ``moogs_structures`` minimu
 since with an older MSL the file names an unregistered type and fails to load
 (``_MSL_TYPE_SINCE``). The same goes for a field MSL added to a type later
 (``_MSL_FIELD_SINCE``): an older MSL skips it without a word, so what it sets is
-lost there. A field some Minecraft line of MSL never reads, in any release, warns
-on those versions (``_MSL_FIELD_WINDOWS``).
+lost there. And for a value MSL accepts in a field only from a later release
+(``_MSL_VALUE_SINCE``): an older MSL cannot read it. A field some Minecraft line
+of MSL never reads, in any release, warns on those versions (``_MSL_FIELD_WINDOWS``).
 
 Two ``y_allowance`` shapes a JSON schema cannot express are checked by hand:
 ``max_y_allowed`` below ``min_y_allowed`` (MSL rejects it at datapack load), and
 a ``max`` with no ``min`` on the generic jigsaw type (MSL unwraps the absent
-``min`` and crashes chunk generation).
+``min`` and crashes chunk generation). So are the rules MSL's codec applies to a
+versioned element's ``adaptation_area`` once it has read it: exactly one of
+``columns`` or ``footprint``, ``[min, max]`` ranges, and a rigid projection.
 """
 from __future__ import annotations
 
@@ -61,6 +64,7 @@ _MSL_ELEMENT_SCHEMAS: dict[str, str] = {
     "moogs_structures:mirroring_single_pool_element": "msl_mirroring_pool_element.json",
     "moogs_structures:legacy_ocean_bottom_single_pool_element": "msl_legacy_ocean_bottom_pool_element.json",
 }
+_VERSIONED_ELEMENT = "moogs_structures:versioned_single_pool_element"
 _MSL_PLACEMENT_SCHEMAS: dict[str, str] = {
     "moogs_structures:advanced_random_spread": "msl_advanced_random_spread.json",
     "moogs_structures:conditional_concentric_rings": "msl_conditional_concentric_rings.json",
@@ -125,6 +129,20 @@ _MSL_FIELD_SINCE: dict[tuple[str, str], tuple[int, int, int]] = {
     ("moogs_structures:mirroring_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
     ("moogs_structures:legacy_ocean_bottom_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
     ("moogs_structures:versioned_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
+    ("moogs_structures:versioned_single_pool_element", "adaptation_area"): (3, 6, 0),
+}
+
+# Values a field accepts only from a later MSL release, from the branch that adds them
+# (mixed-adaptation: "none" in EnhancedTerrainAdaptation.CODEC). An older MSL's codec
+# cannot read the value: from 1.20.5 the file fails to load, while on 1.20-1.20.4
+# DataFixerUpper 6's optionalFieldOf drops a value it cannot read without a word.
+_MSL_VALUE_SINCE: dict[tuple[str, str, str], tuple[int, int, int]] = {
+    (type_id, "enhanced_terrain_adaptation", "none"): (3, 6, 0)
+    for type_id in ("moogs_structures:moogs_structures_generic_jigsaw_structure",
+                    "moogs_structures:moogs_structures_generic_nether_jigsaw_structure",
+                    "moogs_structures:versioned_single_pool_element",
+                    "moogs_structures:mirroring_single_pool_element",
+                    "moogs_structures:legacy_ocean_bottom_single_pool_element")
 }
 
 # Fields MSL reads on some Minecraft lines only, in every release: (first DataVersion
@@ -257,6 +275,37 @@ def _check_y_allowance(rel, stype: str, data: dict) -> int:
     return 0
 
 
+def _check_adaptation_area(rel, where: str, element: dict) -> int:
+    """MSL 3.6.0's checks on a versioned element's ``adaptation_area`` after its codec
+    has read the fields (``AdaptationArea.check``, ``ColumnRect.RANGE``,
+    ``VersionAwareSinglePoolElement.checkArea``). The rigid projection is checked on the
+    whole element, so a terrain-matching one fails the pool on every version; the other
+    two fail it from 1.20.5, while on 1.20-1.20.4 (DataFixerUpper 6) MSL drops the area
+    without a word."""
+    area = element.get("adaptation_area")
+    if not isinstance(area, dict):
+        return 0
+    at = f"{where} > adaptation_area"
+    problems: list[tuple[str, str]] = []
+    if ("columns" in area) == ("footprint" in area):
+        problems.append((at, 'needs exactly one of "columns" or "footprint"'))
+    columns = area.get("columns")
+    for i, rect in enumerate(columns if isinstance(columns, list) else []):
+        for axis in ("x", "z"):
+            pair = rect.get(axis) if isinstance(rect, dict) else None
+            if (isinstance(pair, list) and len(pair) == 2 and all(isinstance(n, int) for n in pair)
+                    and pair[0] > pair[1]):
+                problems.append((f"{at} > columns > {i} > {axis}",
+                                 f"a column range is [min, max], and {pair[0]} is more than {pair[1]}"))
+    if element.get("projection") != "rigid":
+        problems.append((at, 'needs "projection": "rigid"; MSL refuses the pool otherwise, as only a rigid '
+                             'piece is shaped around'))
+    for path, message in problems:
+        print(f"  [template_pool] {rel} @ {path}")
+        print(f"    {message}")
+    return len(problems)
+
+
 def _check_msl_types(subdir: str, rel, data: dict, dv_range, used: dict | None = None) -> int:
     errors = 0
 
@@ -268,6 +317,9 @@ def _check_msl_types(subdir: str, rel, data: dict, dv_range, used: dict | None =
         for (t, field) in _MSL_FIELD_SINCE:
             if t == type_id and field in obj:
                 used.setdefault((t, field), set()).add(where)
+        for (t, field, value) in _MSL_VALUE_SINCE:
+            if t == type_id and obj.get(field) == value:
+                used.setdefault((t, field, value), set()).add(where)
 
     if subdir == "structure":
         stype = data.get("type")
@@ -294,6 +346,8 @@ def _check_msl_types(subdir: str, rel, data: dict, dv_range, used: dict | None =
                     errors += 1
                 else:
                     errors += _validate_against(schema_file, element, subdir, rel, where)
+                    if etype == _VERSIONED_ELEMENT:
+                        errors += _check_adaptation_area(rel, where, element)
 
     elif subdir == "processor_list":
         processors = data.get("processors")
@@ -401,12 +455,13 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
 
 def _window_has(key, version_dv: int | None) -> bool:
-    """Whether MSL reads a type (``type_id``) or a field (``(type_id, field)``) on a
-    version at all: its MC window, in any release."""
+    """Whether MSL reads a type (``type_id``), a field (``(type_id, field)``) or a
+    field's value (``(type_id, field, value)``) on a version at all: its MC window, in
+    any release."""
     if version_dv is None:
         return True
     if not isinstance(key, str):
-        field = _MSL_FIELD_WINDOWS.get(key)
+        field = _MSL_FIELD_WINDOWS.get(key[:2])
         if field is not None and not _in_window(field[0], field[1], version_dv):
             return False
         key = key[0]
@@ -441,9 +496,10 @@ def _check_msl_field_windows(ctx, svc, used: dict) -> int:
 
 
 def _check_msl_releases(ctx, svc, used: dict) -> int:
-    """Types and fields first shipped in a later MSL than the oldest one the mod allows."""
+    """Types, fields and values first shipped in a later MSL than the oldest one the mod allows."""
     floored: dict = {t: since for t, since in _MSL_TYPE_SINCE.items() if t in used}
     floored.update({k: since for k, since in _MSL_FIELD_SINCE.items() if k in used})
+    floored.update({k: since for k, since in _MSL_VALUE_SINCE.items() if k in used})
     if not floored:
         return 0
     declared, sources = msl_upgrade.declared_minimum(svc.project.root)
@@ -475,6 +531,17 @@ def _check_msl_releases(ctx, svc, used: dict) -> int:
             print(f"    on {runs} {allows}, which does not register it, so "
                   f"{', '.join(files[:3])}{more} fail to load there. Raise the moogs_structures minimum "
                   f"to {msl_upgrade.fmt(since)}{_fabric_hint(since)}.")
+        elif len(key) == 3:
+            named = f"{', '.join(files[:3])}{more}"
+            fails = [v for v, _ in short if parse_version(v) >= (1, 20, 5)]
+            dropped = [v for v, _ in short if parse_version(v) < (1, 20, 5)]
+            effects = [f"{named} fail to load on {_version_runs(fails, order)}"] if fails else []
+            if dropped:
+                effects.append(f"on {_version_runs(dropped, order)} the field is dropped without a word, "
+                               f"so {named} lose what it sets")
+            print(f"  [msl] {type_id} `{key[1]}: \"{key[2]}\"` first accepted by MSL {msl_upgrade.fmt(since)}")
+            print(f"    on {runs} {allows}, which cannot read it: {'; '.join(effects)}. Raise the "
+                  f"moogs_structures minimum to {msl_upgrade.fmt(since)}{_fabric_hint(since)}.")
         else:
             print(f"  [msl] {type_id} `{key[1]}` first read by MSL {msl_upgrade.fmt(since)}")
             print(f"    on {runs} {allows}, which skips it without a word, so "
