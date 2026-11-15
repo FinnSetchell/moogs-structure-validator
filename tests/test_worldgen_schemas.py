@@ -976,3 +976,33 @@ def test_terrain_adaptation_none_needs_msl_3_6_0(tmp_path, monkeypatch, capsys):
     _msl_mod(root, ">=3.6.0")
     passed, _ = mod.run(FakeContext("test", ["1.20.4", "1.20.6", "1.21.1"], root))
     assert passed, capsys.readouterr().out
+
+
+# --- salts above the int range ---------------------------------------------------------
+
+def _salted_set(salt: int) -> dict:
+    return {"structures": [{"structure": "test:tree", "weight": 1}],
+            "placement": {"type": "minecraft:random_spread", "salt": salt, "spacing": 30, "separation": 12}}
+
+
+def test_a_salt_above_the_int_range_warns_with_the_salt_minecraft_uses(tmp_path, capsys):
+    # MVS's dark oak dead tree: Gson keeps the low 32 bits of 22201927364.
+    _write(tmp_path, "test", "structure_set", "tree.json", _salted_set(22201927364))
+    passed, summary = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert passed and "1 warning(s)" in summary, out
+    assert "[WARN] structure_set/tree.json @ placement > salt" in out, out
+    assert "22201927364 is above 2147483647" in out and "with salt 727090884 instead" in out, out
+
+
+def test_a_salt_that_comes_out_negative_fails(tmp_path, capsys):
+    _write(tmp_path, "test", "structure_set", "tree.json", _salted_set(2 ** 31))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed and "reads -2147483648 and refuses the set" in out, out
+
+
+def test_the_largest_int_salt_is_quiet(tmp_path, capsys):
+    _write(tmp_path, "test", "structure_set", "tree.json", _salted_set(2 ** 31 - 1))
+    passed, summary = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    assert passed and "warning" not in summary, capsys.readouterr().out

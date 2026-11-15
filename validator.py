@@ -47,6 +47,7 @@ CHECK_NAMES = [
     "check_msl_replace_vanilla",
     "check_msl_placements_and_processors",
     "check_msl_adaptation_areas",
+    "check_branch_parity",
     "check_item_format",
     "check_book_contents",
     "check_potion_effects",
@@ -80,6 +81,8 @@ def load_config(config_path: Path) -> dict:
         raise ValueError("config missing required non-empty list field 'mc_versions'")
     if "overlay" in cfg and not isinstance(cfg["overlay"], bool):
         raise ValueError("config field 'overlay' must be true or false")
+    if "compare_branch" in cfg and not isinstance(cfg["compare_branch"], str):
+        raise ValueError("config field 'compare_branch' must be a branch name")
     return cfg
 
 
@@ -227,6 +230,9 @@ def main() -> None:
     parser.add_argument("--require-claim", action="store_true",
                         help="fail check_claimed_versions when nothing beyond validator.json states a "
                              "published window (always on when GITHUB_ACTIONS is set)")
+    parser.add_argument("--compare-branch", metavar="REF", default=None,
+                        help="the mod's other datapack branch to compare worldgen with (a git ref of "
+                             "this repo); overrides validator.json's compare_branch")
     parser.add_argument("--json", dest="json_out", nargs="?", const="-", default=None, metavar="PATH",
                         help="emit machine-readable JSON report (path or - for stdout)")
     args = parser.parse_args()
@@ -247,6 +253,7 @@ def main() -> None:
         overlay=cfg.get("overlay", False),
         claims=list(args.claim),
         require_claim=args.require_claim,
+        compare_branch=args.compare_branch or cfg.get("compare_branch"),
     )
     ctx.extra_ids = resolve_extra_ids(ctx.extra_ids_raw, ctx.project_root)
 

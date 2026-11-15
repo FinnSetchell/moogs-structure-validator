@@ -22,6 +22,10 @@ a ``max`` with no ``min`` on the generic jigsaw type (MSL unwraps the absent
 ``min`` and crashes chunk generation). So are the rules MSL's codec applies to a
 versioned element's ``adaptation_area`` once it has read it: exactly one of
 ``columns`` or ``footprint``, ``[min, max]`` ranges, and a rigid projection.
+
+A structure set's ``salt`` above 2147483647 warns: Minecraft keeps the low 32 bits
+of it, so the set is placed with another salt than the one written (an error when
+that comes out negative, which the salt's codec refuses).
 """
 from __future__ import annotations
 
@@ -49,6 +53,7 @@ _SUBDIRS: list[tuple[str, str]] = [
 ]
 
 _MSL_PREFIX = "moogs_structures:"
+_INT_MAX = 2 ** 31 - 1
 
 # GenericJigsawStructure.offsetToNewHeight unwraps minYAllowed inside a branch guarded
 # only on maxYAllowed, so this type crashes chunkgen when a y_allowance has a max and no
@@ -306,6 +311,27 @@ def _check_adaptation_area(rel, where: str, element: dict) -> int:
     return len(problems)
 
 
+def _check_salt(rel, data: dict) -> tuple[int, int]:
+    """``(errors, warnings)`` for a placement ``salt`` above the int range. Gson reads a JSON
+    number lazily and the salt's codec (``ExtraCodecs.NON_NEGATIVE_INT``, in vanilla's
+    placements and MSL's ``advanced_random_spread`` alike) takes its ``intValue()``, which
+    keeps the low 32 bits: another salt, or a negative one the codec refuses."""
+    placement = data.get("placement")
+    salt = placement.get("salt") if isinstance(placement, dict) else None
+    if isinstance(salt, bool) or not isinstance(salt, int) or salt <= _INT_MAX:
+        return 0, 0
+    read = (salt + 2 ** 31) % 2 ** 32 - 2 ** 31
+    if read < 0:
+        print(f"  [structure_set] {rel} @ placement > salt")
+        print(f"    {salt} is above {_INT_MAX}: Minecraft keeps its low 32 bits, reads {read} and refuses "
+              f"the set, as a salt cannot be negative")
+        return 1, 0
+    print(f"  [WARN] structure_set/{rel.as_posix() if hasattr(rel, 'as_posix') else rel} @ placement > salt")
+    print(f"    {salt} is above {_INT_MAX}: Minecraft keeps its low 32 bits and places the set with "
+          f"salt {read} instead")
+    return 0, 1
+
+
 def _check_msl_types(subdir: str, rel, data: dict, dv_range, used: dict | None = None) -> int:
     errors = 0
 
@@ -400,6 +426,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
     failed = False
     error_count = 0
+    salt_warnings = 0
     counts: dict[str, int] = {}
     used_types: dict[str, set[str]] = {}
 
@@ -428,6 +455,10 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
             n = _print_errors(validator, data, subdir, rel, "(root)")
             n += _check_msl_types(subdir, rel, data, dv_range, used_types)
+            if subdir == "structure_set" and isinstance(data, dict):
+                salt_errors, salt_warns = _check_salt(rel, data)
+                n += salt_errors
+                salt_warnings += salt_warns
             if n:
                 error_count += n
                 failed = True
@@ -436,7 +467,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     if n_msl:
         error_count += n_msl
         failed = True
-    warn_count = _check_msl_field_windows(ctx, svc, used_types)
+    warn_count = _check_msl_field_windows(ctx, svc, used_types) + salt_warnings
 
     total = sum(counts.values())
     count_str = "  ".join(f"{k}: {v}" for k, v in counts.items() if v > 0)

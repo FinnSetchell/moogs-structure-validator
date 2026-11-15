@@ -37,6 +37,9 @@ class ValidatorContext:
     claims: list[str] = field(default_factory=list)
     # --require-claim: a run without any claim beyond validator.json fails.
     require_claim: bool = False
+    # The mod's other datapack branch (a git ref of this repo), to compare with:
+    # validator.json "compare_branch" or --compare-branch. None skips the comparison.
+    compare_branch: str | None = None
 
 
 class FileRange:
