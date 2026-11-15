@@ -31,8 +31,8 @@
     },
     "land_search_direction": {
       "type": "string",
-      "enum": ["HIGHEST_LAND", "LOWEST_LAND", "FIXED_HEIGHT"],
-      "description": "Whether to anchor the structure to the highest or lowest land surface found within the bounding box. FIXED_HEIGHT skips the land search and places the base at start_height plus ledge_offset_y."
+      "enum": ["HIGHEST_LAND", "LOWEST_LAND", "FIXED_HEIGHT", "CEILING"],
+      "description": "Whether to anchor the structure to the highest or lowest land surface found within the bounding box. FIXED_HEIGHT skips the land search and places the base at start_height plus ledge_offset_y. CEILING (MSL 4.1.0+) hangs the structure from the highest ceiling its start piece fits under, its top row just under the rock; ledge_offset_y then sinks the top into the rock, and cannot_spawn_in_liquid keeps it over solid ground. StringRepresentable.fromEnum: upper case only."
     },
     "y_allowance": {
       "type": "object",
