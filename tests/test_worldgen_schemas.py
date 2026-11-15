@@ -978,6 +978,81 @@ def test_terrain_adaptation_none_needs_msl_3_6_0(tmp_path, monkeypatch, capsys):
     assert passed, capsys.readouterr().out
 
 
+# --- MSL 4.1.0 structures hanging from ceilings ----------------------------------------
+
+def _hanging_structure(**overrides) -> dict:
+    return _generic_structure(**{"type": "moogs_structures:moogs_structures_generic_nether_jigsaw_structure",
+                                 "land_search_direction": "CEILING", "ledge_offset_y": 2, **overrides})
+
+
+CEILING_PROC = {"processor_type": "moogs_structures:follow_ceiling_processor"}
+
+
+def test_hanging_structures_and_the_follow_ceiling_processor_pass(tmp_path, capsys):
+    # Registered on every Minecraft line, with follow_floor_processor's fields.
+    _write(tmp_path, "test", "structure", "s.json", _hanging_structure(cannot_spawn_in_liquid=True))
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([
+        CEILING_PROC, {**CEILING_PROC, "search_range": 64, "offset": 3}, {**CEILING_PROC, "search_range": 1}]))
+    passed, _ = mod.run(FakeContext("test", ["1.20.1", "1.21.1"], tmp_path))
+    assert passed, capsys.readouterr().out
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"search_range": 0}, "less than the minimum of 1"),
+    ({"search_range": 65}, "greater than the maximum of 64"),
+    ({"offset": 1.5}, "is not of type 'integer'"),
+])
+def test_follow_ceiling_fields_msl_refuses_fail(tmp_path, capsys, change, message):
+    # StrictOptionalField: a value out of range fails the list instead of reading as the default.
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([{**CEILING_PROC, **change}]))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed and message in out, out
+
+
+def test_a_land_search_direction_msl_cannot_read_fails(tmp_path, capsys):
+    # StringRepresentable.fromEnum reads the upper-case names only.
+    _write(tmp_path, "test", "structure", "s.json", _hanging_structure(land_search_direction="ceiling"))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed and "s.json @ land_search_direction" in out, out
+
+
+def test_the_follow_ceiling_processor_needs_msl_4_1_0(tmp_path, monkeypatch, capsys):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([CEILING_PROC]))
+    _msl_mod(tmp_path, ">=3.4.0")
+    passed, _ = mod.run(FakeContext("test", ["1.20.1", "1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert "moogs_structures:follow_ceiling_processor first shipped in MSL 4.1.0" in out, out
+    assert "Raise the moogs_structures minimum to 4.1.0" in out, out
+    root = tmp_path / "min"
+    _write(root, "test", "processor_list", "p.json", _processor_list([CEILING_PROC]))
+    _msl_mod(root, ">=4.1.0")
+    passed, _ = mod.run(FakeContext("test", ["1.20.1", "1.21.1"], root))
+    assert passed, capsys.readouterr().out
+
+
+def test_hanging_from_a_ceiling_needs_msl_4_1_0_on_every_version(tmp_path, monkeypatch, capsys):
+    # land_search_direction is required, so an older MSL refuses the structure on 1.20-1.20.4 too.
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "structure", "s.json", _hanging_structure())
+    _msl_mod(tmp_path, ">=3.4.0")
+    passed, _ = mod.run(FakeContext("test", ["1.20.4", "1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert ('moogs_structures_generic_nether_jigsaw_structure `land_search_direction: "CEILING"` '
+            "first accepted by MSL 4.1.0") in out, out
+    assert "structure/s.json fail to load on 1.20.4-1.21.1" in out, out
+    assert "dropped without a word" not in out, out
+    root = tmp_path / "min"
+    _write(root, "test", "structure", "s.json", _hanging_structure())
+    _msl_mod(root, ">=4.1.0")
+    passed, _ = mod.run(FakeContext("test", ["1.20.4", "1.21.1"], root))
+    assert passed, capsys.readouterr().out
+
+
 # --- salts above the int range ---------------------------------------------------------
 
 def _salted_set(salt: int) -> dict:

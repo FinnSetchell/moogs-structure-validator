@@ -144,8 +144,11 @@ vanilla-mcdoc symbol table pinned in `data/format_model/`:
   `_MSL_FIELD_SINCE` does the same for a field MSL adds to a type that already
   exists (find it with `git grep -E '[fF]ieldOf\("' <tag>` on each tag), and
   `_MSL_VALUE_SINCE` for a value a field accepts only from a later release (the string
-  `"none"` for `enhanced_terrain_adaptation` from 3.6.0). MSL 1.x has no tags: its types
-  were read from the published jars' registration classes.
+  `"none"` for `enhanced_terrain_adaptation` from 3.6.0, `"CEILING"` for the Nether
+  structure's `land_search_direction` from 4.1.0). A value in a field the type's schema
+  lists as `required` fails the file on every version; in an optional one, only from
+  1.20.5. MSL 1.x has no tags: its types were read from the published jars'
+  registration classes.
 - `data/msl_builds.json` -- every MSL build per loader and Minecraft version, with the
   version its loader compares (`builds`: read from the jar where one was at hand,
   otherwise following what every jar read shows), the oldest MSL published for each
