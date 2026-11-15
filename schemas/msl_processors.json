@@ -313,6 +313,23 @@
     }
   },
 
+  "moogs_structures:follow_ceiling_processor": {
+    "type": "object",
+    "description": "MSL 4.1.0+. follow_floor_processor upside down: moves each column of a piece up or down so its top row sits just under the rock above it. Same codec shape as follow_floor_processor, registered on every Minecraft line. Both fields use StrictOptionalField: a value out of range fails the list.",
+    "required": ["processor_type"],
+    "properties": {
+      "processor_type": { "type": "string" },
+      "search_range": {
+        "type": "integer", "minimum": 1, "maximum": 64,
+        "description": "How far each column looks up or down for the rock above it (Codec.intRange(1, 64)). Default 16."
+      },
+      "offset": {
+        "type": "integer",
+        "description": "Blocks the piece's top moves further up, into the rock. Default 0."
+      }
+    }
+  },
+
   "moogs_structures:rail_slope_processor": {
     "type": "object",
     "description": "MSL 3.5.0+. Lets rails on terrain-matched pieces slope with the ground. MapCodec.unit: no fields.",
