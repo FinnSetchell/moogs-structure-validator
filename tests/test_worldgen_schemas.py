@@ -268,7 +268,7 @@ def test_unknown_msl_processor_type_fails(tmp_path):
     assert not passed
 
 
-# MSL 3.5.0: follow_floor_processor (search_range Codec.intRange(1, 64), default 16;
+# MSL 4.0.0: follow_floor_processor (search_range Codec.intRange(1, 64), default 16;
 # offset an int, default 0) and rail_slope_processor (no fields).
 def test_follow_floor_and_rail_slope_processors_pass(tmp_path):
     procs = [{"processor_type": "moogs_structures:follow_floor_processor"},
@@ -281,7 +281,7 @@ def test_follow_floor_and_rail_slope_processors_pass(tmp_path):
 
 
 def test_rail_rotation_processor_passes(tmp_path):
-    # MSL 3.5.0, MapCodec.unit: MSL adds it to its own structures, and a pool may list it.
+    # MSL 4.0.0, MapCodec.unit: MSL adds it to its own structures, and a pool may list it.
     proc = {"processor_type": "moogs_structures:rail_rotation_processor"}
     _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
     passed, _ = mod.run(FakeContext("test", ["1.20.1", "1.21.1"], tmp_path))
@@ -289,7 +289,7 @@ def test_rail_rotation_processor_passes(tmp_path):
 
 
 def test_follow_floor_search_range_out_of_range_fails(tmp_path, capsys):
-    # MSL reads a value outside 1-64 as 16 without a word, so it is an error here.
+    # StrictOptionalField: MSL refuses a value outside 1-64.
     for bad, why in ((0, "less than the minimum of 1"), (65, "greater than the maximum of 64")):
         root = tmp_path / str(bad)
         proc = {"processor_type": "moogs_structures:follow_floor_processor", "search_range": bad}
@@ -690,7 +690,7 @@ def test_advanced_random_spread_valid_passes(tmp_path):
     assert passed
 
 
-# --- MSL 3.6.0 adaptation areas and "none" ---------------------------------------------
+# --- MSL 4.0.0 adaptation areas and "none" ---------------------------------------------
 
 def _area_element(**overrides) -> dict:
     element = {"element_type": "moogs_structures:versioned_single_pool_element", "location": "test:start",

@@ -195,7 +195,7 @@ def _check_y_allowance(rel, stype: str, data: dict) -> int:
 
 
 def _check_adaptation_area(rel, where: str, element: dict) -> int:
-    """MSL 3.6.0's checks on a versioned element's ``adaptation_area`` after its codec
+    """MSL 4.0.0's checks on a versioned element's ``adaptation_area`` after its codec
     has read the fields (``AdaptationArea.check``, ``ColumnRect.RANGE``,
     ``VersionAwareSinglePoolElement.checkArea``). The rigid projection is checked on the
     whole element, so a terrain-matching one fails the pool on every version; the other

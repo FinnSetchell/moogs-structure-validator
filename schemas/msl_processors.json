@@ -298,7 +298,7 @@
 
   "moogs_structures:follow_floor_processor": {
     "type": "object",
-    "description": "MSL 3.5.0+. Moves each column of a piece onto the floor found near its placement height, so it follows the ground under the Nether roof, in caves and under overhangs. Both fields use orElse: a value out of range is read as the default without a word.",
+    "description": "MSL 4.0.0+. Moves each column of a piece onto the floor found near its placement height, so it follows the ground under the Nether roof, in caves and under overhangs. Both fields use StrictOptionalField: a value out of range fails the list.",
     "required": ["processor_type"],
     "properties": {
       "processor_type": { "type": "string" },
@@ -332,7 +332,7 @@
 
   "moogs_structures:rail_slope_processor": {
     "type": "object",
-    "description": "MSL 3.5.0+. Lets rails on terrain-matched pieces slope with the ground. MapCodec.unit: no fields.",
+    "description": "MSL 4.0.0+. Lets rails on terrain-matched pieces slope with the ground. MapCodec.unit: no fields.",
     "required": ["processor_type"],
     "properties": {
       "processor_type": { "type": "string" }
@@ -341,7 +341,7 @@
 
   "moogs_structures:rail_rotation_processor": {
     "type": "object",
-    "description": "MSL 3.5.0+. Stops flat rails lying across a rotated piece. MSL adds it to its own structures; a pool can also list it by hand. MapCodec.unit: no fields.",
+    "description": "MSL 4.0.0+. Stops flat rails lying across a rotated piece. MSL adds it to its own structures; a pool can also list it by hand. MapCodec.unit: no fields.",
     "required": ["processor_type"],
     "properties": {
       "processor_type": { "type": "string" }

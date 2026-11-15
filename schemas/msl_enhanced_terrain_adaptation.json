@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-04/schema#",
   "title": "MSL enhanced terrain adaptation",
-  "description": "Gaussian-kernel terrain adaptation applied around structure pieces. Appears on both MSL jigsaw structures and as a per-element override on the versioned, mirroring and legacy ocean bottom pool elements. From MSL 3.6.0 it can also be the string \"none\", so a piece turns off the adaptation it would take from its structure; any other string is refused (pattern: the string alternative; required and properties: the object one).",
+  "description": "Gaussian-kernel terrain adaptation applied around structure pieces. Appears on both MSL jigsaw structures and as a per-element override on the versioned, mirroring and legacy ocean bottom pool elements. From MSL 4.0.0 it can also be the string \"none\", so a piece turns off the adaptation it would take from its structure; any other string is refused (pattern: the string alternative; required and properties: the object one).",
   "type": ["object", "string"],
   "pattern": "^none$",
   "required": ["kernel_size", "kernel_distance", "top", "bottom"],
