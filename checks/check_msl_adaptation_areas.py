@@ -1,4 +1,4 @@
-"""Adaptation areas that do less than they say (MSL 3.6.0+, warn-only).
+"""Adaptation areas that do less than they say (MSL 4.0.0+, warn-only).
 
 A versioned element's ``adaptation_area`` narrows MSL's enhanced terrain adaptation
 to some columns of a rigid piece, and with ``outside_follows_ground`` the columns
