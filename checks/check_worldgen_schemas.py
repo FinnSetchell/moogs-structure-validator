@@ -94,8 +94,9 @@ _MSL_TYPE_WINDOWS: dict[str, tuple[int | None, int | None]] = {
 # `git grep` on every tag) and its CHANGELOG. 3.0.0 added the processors (first
 # tags 1.21.1-3.0.0-alpha.1 and 1.20.4-3.0.0-alpha.2; trial spawner and vault in
 # commit 02c2aed), 3.1.0 the replace-vanilla processor and placement, 3.1.2 the
-# hanging entity anchor, 3.5.0 the follow floor, rail slope and rail rotation processors
-# (from their branches, follow-floor-processor and rail-slope-processor), 4.1.0 the follow
+# hanging entity anchor, 4.0.0 the follow floor, rail slope and rail rotation processors
+# (from their branches, follow-floor-processor and rail-slope-processor, written for 3.5.0;
+# MSL released 3.4.3, 3.5.0 and 3.6.0 together as 4.0.0), 4.1.0 the follow
 # ceiling processor (branch nether-roof, aimed at the release after 4.0.0). MSL 1.x is not tagged,
 # so it was read from the published jars themselves (the registration classes'
 # string constants of 1.0.0, 1.0.1, 1.0.2 and 1.1.0 builds, on Fabric, Forge and
@@ -117,9 +118,9 @@ _MSL_TYPE_SINCE: dict[str, tuple[int, int, int]] = {
     "moogs_structures:vanilla_loot_swap_processor": (3, 1, 0),
     "moogs_structures:conditional_concentric_rings": (3, 1, 0),
     "moogs_structures:hanging_entity_anchor_processor": (3, 1, 2),
-    "moogs_structures:follow_floor_processor": (3, 5, 0),
-    "moogs_structures:rail_slope_processor": (3, 5, 0),
-    "moogs_structures:rail_rotation_processor": (3, 5, 0),
+    "moogs_structures:follow_floor_processor": (4, 0, 0),
+    "moogs_structures:rail_slope_processor": (4, 0, 0),
+    "moogs_structures:rail_rotation_processor": (4, 0, 0),
     "moogs_structures:follow_ceiling_processor": (4, 1, 0),
 }
 
@@ -136,17 +137,17 @@ _MSL_FIELD_SINCE: dict[tuple[str, str], tuple[int, int, int]] = {
     ("moogs_structures:mirroring_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
     ("moogs_structures:legacy_ocean_bottom_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
     ("moogs_structures:versioned_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
-    ("moogs_structures:versioned_single_pool_element", "adaptation_area"): (3, 6, 0),
+    ("moogs_structures:versioned_single_pool_element", "adaptation_area"): (4, 0, 0),
 }
 
 # Values a field accepts only from a later MSL release, from the branch that adds them
-# (mixed-adaptation: "none" in EnhancedTerrainAdaptation.CODEC; nether-roof: "CEILING"
+# (mixed-adaptation, released in 4.0.0: "none" in EnhancedTerrainAdaptation.CODEC; nether-roof: "CEILING"
 # in the Nether structure's LAND_SEARCH_DIRECTION). An older MSL's codec cannot read the
 # value. In a required field the file fails to load on every version; in an optional one
 # it does from 1.20.5, while on 1.20-1.20.4 DataFixerUpper 6's optionalFieldOf drops a
 # value it cannot read without a word.
 _MSL_VALUE_SINCE: dict[tuple[str, str, str], tuple[int, int, int]] = {
-    **{(type_id, "enhanced_terrain_adaptation", "none"): (3, 6, 0)
+    **{(type_id, "enhanced_terrain_adaptation", "none"): (4, 0, 0)
        for type_id in ("moogs_structures:moogs_structures_generic_jigsaw_structure",
                        "moogs_structures:moogs_structures_generic_nether_jigsaw_structure",
                        "moogs_structures:versioned_single_pool_element",
@@ -287,7 +288,7 @@ def _check_y_allowance(rel, stype: str, data: dict) -> int:
 
 
 def _check_adaptation_area(rel, where: str, element: dict) -> int:
-    """MSL 3.6.0's checks on a versioned element's ``adaptation_area`` after its codec
+    """MSL 4.0.0's checks on a versioned element's ``adaptation_area`` after its codec
     has read the fields (``AdaptationArea.check``, ``ColumnRect.RANGE``,
     ``VersionAwareSinglePoolElement.checkArea``). The rigid projection is checked on the
     whole element, so a terrain-matching one fails the pool on every version; the other

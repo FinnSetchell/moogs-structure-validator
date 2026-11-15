@@ -42,7 +42,7 @@
     "enhanced_terrain_adaptation": { "$ref": "msl_enhanced_terrain_adaptation.json" },
     "adaptation_area": {
       "type": "object",
-      "description": "MSL 3.6.0+. The columns of a rigid piece the enhanced terrain adaptation works around, instead of the piece's whole box. Exactly one of columns or footprint, and the element's projection must be rigid (both checked by hand in check_worldgen_schemas, as is min <= max in a column range).",
+      "description": "MSL 4.0.0+. The columns of a rigid piece the enhanced terrain adaptation works around, instead of the piece's whole box. Exactly one of columns or footprint, and the element's projection must be rigid (both checked by hand in check_worldgen_schemas, as is min <= max in a column range).",
       "properties": {
         "columns": {
           "type": "array",
