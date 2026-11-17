@@ -28,7 +28,7 @@ VERSIONS = [
 REGISTRIES = {
     "loot_function_type": ["set_count", "enchant_randomly", "enchant_with_levels", "set_contents", "sequence",
                            "filtered", "modify_contents", "exploration_map", "set_item", "set_name",
-                           "discard"],
+                           "discard", "set_written_book_pages", "set_book_cover"],
     "loot_condition_type": ["random_chance", "survives_explosion", "all_of", "any_of", "inverted",
                             "entity_properties"],
     "item": ["diamond", "book", "iron_ingot", "stone", "chain", "iron_chain", "map", "filled_map",
@@ -1151,6 +1151,56 @@ def test_the_converter_puts_the_map_steps_around_exploration_map():
     assert got[0]["item"] == "minecraft:buried_treasure_map"
     plain = conv.entry_function_list({"type": "minecraft:item", "name": "minecraft:compass"}, [MAP_OLD])
     assert plain["type"] == "minecraft:exploration_map"
+
+
+# --- a loot function argument in the wrong shape ---------------------------------------------
+# MES's lore book wrote set_written_book_pages' `mode` as {"type": "replace_all"}. Every version
+# reads a plain string there; the game refused the table, and as the treasure tables point at
+# it, the whole loot registry, so MES's datapack did not load at all.
+
+PAGES = [{"text": "The fleet drifts forever."}]
+
+
+def _book(mode):
+    return {"type": "minecraft:item", "name": "minecraft:book",
+            "functions": [{"function": "minecraft:set_written_book_pages", "pages": PAGES, "mode": mode}],
+            "modifier": [{"type": "minecraft:set_written_book_pages", "pages": PAGES, "mode": mode}]}
+
+
+def test_a_book_page_mode_written_as_an_object_fails_on_every_version(tmp_path, stubbed, capsys):
+    root = _project(tmp_path, {"data/test/loot_table/lore.json": _table(_book({"type": "replace_all"}))})
+    passed, summary = _run(root, ["1.21", "26.2", "26.3"])
+    out = capsys.readouterr().out
+    assert not passed and "on 1.21, 26.2-26.3" in summary, out
+    assert "on 1.21, 26.2: one of a fixed set of values is read here, found an object" in out, out
+    assert "at pools[0].entries[0].functions[0].mode" in out and "at pools[0].entries[0].modifier[0].mode" in out
+
+
+def test_a_book_page_mode_written_as_a_string_passes(tmp_path, stubbed, capsys):
+    root = _project(tmp_path, {"data/test/loot_table/lore.json": _table(_book("replace_all"))})
+    passed, _ = _run(root, ["1.21", "26.2", "26.3"])
+    assert passed, capsys.readouterr().out
+
+
+@pytest.mark.parametrize("function, key, bad", [
+    ({"function": "minecraft:set_count", "count": 3}, "count", "3"),
+    ({"function": "minecraft:enchant_randomly", "options": "#minecraft:on_random_loot"}, "options",
+     {"type": "#minecraft:on_random_loot"}),
+    ({"function": "minecraft:exploration_map", "destination": "#minecraft:on_treasure_maps", "zoom": 2},
+     "zoom", "2"),
+    ({"function": "minecraft:set_book_cover", "title": "T", "author": "A", "generation": 0}, "generation", "0"),
+    ({"function": "minecraft:set_name", "name": {"text": "Map"}, "target": "item_name"}, "target",
+     {"type": "item_name"}),
+])
+def test_function_arguments_the_mods_write_fail_in_the_wrong_shape(tmp_path, stubbed, capsys, function, key, bad):
+    entry = {"type": "minecraft:item", "name": "minecraft:book", "functions": [function]}
+    root = _project(tmp_path, {"data/test/loot_table/good.json": _table(entry)})
+    assert _run(root, ["1.21"])[0], capsys.readouterr().out
+    entry["functions"] = [{**function, key: bad}]
+    root = _project(tmp_path, {"data/test/loot_table/good.json": _table(entry)})
+    passed, _ = _run(root, ["1.21"])
+    out = capsys.readouterr().out
+    assert not passed and f"at pools[0].entries[0].functions[0].{key}" in out, out
 
 
 # --- what a 26.3 modifier can be ------------------------------------------------------------

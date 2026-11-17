@@ -5,6 +5,8 @@ targets) and cached. It is then loosened where it is stricter than the game:
 extra top-level keys, numeric or provider ``rolls``, any entry ``type``, and
 functions validated only for having a ``function`` id -- the game accepts all
 of these, and the point here is malformed structure, not exhaustive typing.
+Each function's arguments are read the way each claimed version reads them by
+``check_data_formats``.
 """
 from __future__ import annotations
 
