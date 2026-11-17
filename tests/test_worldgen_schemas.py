@@ -110,6 +110,50 @@ def test_y_allowance_min_without_max_passes(tmp_path):
     assert passed
 
 
+# MSL's 1.20 builds read top-level min_y_allowed / max_y_allowed / allowed_y_range_from_start;
+# its 1.21 builds read y_allowance only. Each skips the other's keys without a word.
+LINE_1_20 = ["1.20", "1.20.1", "1.20.2", "1.20.4", "1.20.6"]
+LINE_1_21 = ["1.21", "1.21.1", "1.21.4", "26.3"]
+NETHER = {"type": "moogs_structures:moogs_structures_generic_nether_jigsaw_structure",
+          "land_search_direction": "HIGHEST_LAND"}
+
+
+@pytest.mark.parametrize("versions, fields", [
+    (LINE_1_20, {"min_y_allowed": 20, "max_y_allowed": 60, "allowed_y_range_from_start": 10}),
+    (LINE_1_21, {"y_allowance": {"min_y_allowed": 20, "max_y_allowed": 60}}),
+    (LINE_1_20 + LINE_1_21, {"min_y_allowed": 20, "max_y_allowed": 60,
+                             "y_allowance": {"min_y_allowed": 20, "max_y_allowed": 60}}),
+])
+def test_height_limits_in_the_form_each_line_reads_pass(tmp_path, capsys, versions, fields):
+    for i, base in enumerate(({}, NETHER)):
+        _write(tmp_path, "test", "structure", f"s{i}.json", _generic_structure(**base, **fields))
+    passed, _ = mod.run(FakeContext("test", versions, tmp_path))
+    assert passed, capsys.readouterr().out
+
+
+@pytest.mark.parametrize("base", [{}, NETHER])
+def test_y_allowance_on_the_1_20_line_fails(tmp_path, capsys, base):
+    _write(tmp_path, "test", "structure", "s.json",
+           _generic_structure(**base, y_allowance={"min_y_allowed": 20, "max_y_allowed": 60}))
+    passed, _ = mod.run(FakeContext("test", LINE_1_20, tmp_path))
+    out = capsys.readouterr().out
+    assert not passed
+    assert "s.json @ y_allowance\n    skipped on 1.20-1.20.6: MSL's 1.20 builds read the height limits" in out
+
+
+@pytest.mark.parametrize("fields, at", [
+    ({"min_y_allowed": 20, "max_y_allowed": 60}, "min_y_allowed, max_y_allowed"),
+    ({"allowed_y_range_from_start": 10}, "allowed_y_range_from_start"),
+    ({"y_allowance": {"min_y_allowed": 20}, "allowed_y_range_from_start": 10}, "allowed_y_range_from_start"),
+])
+def test_top_level_height_limits_on_the_1_21_line_fail(tmp_path, capsys, fields, at):
+    _write(tmp_path, "test", "structure", "s.json", _generic_structure(**fields))
+    passed, _ = mod.run(FakeContext("test", LINE_1_21, tmp_path))
+    out = capsys.readouterr().out
+    assert not passed
+    assert f"s.json @ {at}\n    skipped on 1.21-26.3: MSL's 1.21 builds read min_y_allowed" in out, out
+
+
 def test_nether_y_allowance_max_without_min_passes(tmp_path):
     """The nether type overrides postLayoutAdjustments and never reaches the crashing
     code, so the same shape is safe there."""

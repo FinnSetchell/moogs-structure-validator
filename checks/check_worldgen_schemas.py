@@ -6,6 +6,13 @@ dispatched to its MSL schema; an id MSL does not register is an error (typo
 catcher), except that a type MSL registers on *some* targeted version is real
 content and stays silent (``_MSL_TYPE_WINDOWS``).
 
+Height limits are read per Minecraft line, in every MSL release: the 1.20 builds read
+top-level ``min_y_allowed``, ``max_y_allowed`` and ``allowed_y_range_from_start``, the
+1.21 builds (Minecraft 1.21 on) only ``y_allowance`` with ``min_y_allowed`` and
+``max_y_allowed`` inside, and each skips the other's keys without a word. A structure
+whose limits are written only in the other line's form has none on that line, an error
+(as is ``allowed_y_range_from_start`` on the 1.21 line, which has no such limit).
+
 Two ``y_allowance`` shapes a JSON schema cannot express are checked by hand:
 ``max_y_allowed`` below ``min_y_allowed`` (MSL rejects it at datapack load), and
 a ``max`` with no ``min`` on the generic jigsaw type (MSL unwraps the absent
@@ -23,7 +30,7 @@ import jsonschema
 
 import schemas.patcher
 from core.context import services
-from core.mcversions import DV_1_21, DV_VERSION_NAMES, BoundarySide, side_of
+from core.mcversions import DV_1_21, DV_VERSION_NAMES, BoundarySide, parse_version, side_of
 
 if TYPE_CHECKING:
     from core.context import ValidatorContext
@@ -170,6 +177,46 @@ def _iter_pool_elements(data: dict):
     elements = data.get("elements")
     if isinstance(elements, list):
         yield from walk(elements, "")
+
+
+_HEIGHT_TYPES = ("moogs_structures:moogs_structures_generic_jigsaw_structure",
+                 "moogs_structures:moogs_structures_generic_nether_jigsaw_structure")
+_TOP_LEVEL_LIMITS = ("min_y_allowed", "max_y_allowed")
+
+
+def _check_height_fields(rel, data: dict, mc_versions) -> int:
+    """Height limits written only in the form the other MSL line reads."""
+    if data.get("type") not in _HEIGHT_TYPES:
+        return 0
+    order = sorted((v for v in mc_versions if parse_version(v)), key=parse_version)
+    old = [v for v in order if parse_version(v) < (1, 21)]
+    new = [v for v in order if parse_version(v) >= (1, 21)]
+    errors = 0
+    if old and "y_allowance" in data and not any(k in data for k in _TOP_LEVEL_LIMITS):
+        print(f"  [structure] {rel} @ y_allowance")
+        print(f"    skipped on {_version_runs(old, order)}: MSL's 1.20 builds read the height limits as "
+              f"top-level min_y_allowed and max_y_allowed, so the structure has no height limit there")
+        errors += 1
+    skipped = [k for k in _TOP_LEVEL_LIMITS if k in data] if "y_allowance" not in data else []
+    skipped += ["allowed_y_range_from_start"] if "allowed_y_range_from_start" in data else []
+    if new and skipped:
+        print(f"  [structure] {rel} @ {', '.join(skipped)}")
+        print(f"    skipped on {_version_runs(new, order)}: MSL's 1.21 builds read min_y_allowed and "
+              f"max_y_allowed only inside y_allowance, and have no allowed_y_range_from_start, so the "
+              f"structure loses this height limit there")
+        errors += 1
+    return errors
+
+
+def _version_runs(versions: list[str], order: list[str]) -> str:
+    idx = {v: i for i, v in enumerate(order)}
+    runs: list[list[str]] = []
+    for v in versions:
+        if runs and idx[v] == idx[runs[-1][-1]] + 1:
+            runs[-1].append(v)
+        else:
+            runs.append([v])
+    return ", ".join(r[0] if len(r) == 1 else f"{r[0]}-{r[-1]}" for r in runs)
 
 
 def _check_y_allowance(rel, stype: str, data: dict) -> int:
@@ -328,6 +375,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
             n = _print_errors(validator, data, subdir, rel, "(root)")
             n += _check_msl_types(subdir, rel, data, dv_range)
+            if subdir == "structure" and isinstance(data, dict):
+                n += _check_height_fields(rel, data, ctx.mc_versions)
             if n:
                 error_count += n
                 failed = True
