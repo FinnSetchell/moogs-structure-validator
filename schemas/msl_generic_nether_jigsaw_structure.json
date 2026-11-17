@@ -20,6 +20,11 @@
       "description": "Namespaced resource location of the starting template pool.",
       "pattern": "^[a-z0-9_.-]+:[a-z0-9_./-]+$"
     },
+    "mc_versions": {
+      "type": "string",
+      "description": "MSL 4.0.0+. The Minecraft versions the structure generates on, one version or a range (\"1.21.4-26.3\"); on any other it has no biomes and is never placed. StrictOptionalField: a range MSL cannot read, or one whose minimum is above its maximum, fails the structure.",
+      "pattern": "^\\s*\\d+(\\.\\d+)*\\s*(-\\s*\\d+(\\.\\d+)*\\s*)?$"
+    },
     "size": {
       "type": "integer",
       "description": "Jigsaw expansion depth. MSL raises the vanilla cap: must be between 0 and 128.",

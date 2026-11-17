@@ -45,7 +45,7 @@ import jsonschema
 import schemas.patcher
 from core import msl_upgrade
 from core.context import services
-from core.mcversions import DV_1_21, DV_VERSION_NAMES, BoundarySide, parse_version, side_of
+from core.mcversions import DV_1_21, DV_VERSION_NAMES, BoundarySide, parse_range, parse_version, side_of
 
 if TYPE_CHECKING:
     from core.context import ValidatorContext
@@ -140,6 +140,10 @@ _MSL_FIELD_SINCE: dict[tuple[str, str], tuple[int, int, int]] = {
     ("moogs_structures:advanced_random_spread", "structure_id"): (3, 1, 0),
     ("moogs_structures:advanced_random_spread", "when_replacing"): (3, 3, 0),
     ("moogs_structures:moogs_structures_generic_jigsaw_structure", "enhanced_terrain_adaptation"): (3, 4, 0),
+    # 4.0.0 (MSL main a67c910): a structure generates only on the versions it names. An older
+    # MSL skips the field, so the structure generates on every version.
+    ("moogs_structures:moogs_structures_generic_jigsaw_structure", "mc_versions"): (4, 0, 0),
+    ("moogs_structures:moogs_structures_generic_nether_jigsaw_structure", "mc_versions"): (4, 0, 0),
     ("moogs_structures:moogs_structures_generic_nether_jigsaw_structure", "enhanced_terrain_adaptation"): (3, 0, 0),
     ("moogs_structures:mirroring_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
     ("moogs_structures:legacy_ocean_bottom_single_pool_element", "enhanced_terrain_adaptation"): (3, 0, 0),
@@ -301,6 +305,19 @@ def _check_height_fields(rel, data: dict, mc_versions) -> int:
               f"structure loses this height limit there")
         errors += 1
     return errors
+
+
+def _check_mc_versions(rel, data: dict) -> int:
+    """A structure's ``mc_versions`` range with its minimum above its maximum: MSL's
+    ``VersionResolver.parseRange`` refuses it, so the structure fails to load."""
+    gate = data.get("mc_versions") if data.get("type") in _HEIGHT_TYPES else None
+    parsed = parse_range("".join(gate.split())) if isinstance(gate, str) and gate.strip() else None
+    if parsed is None or parsed[0] <= parsed[1]:
+        return 0
+    print(f"  [structure] {rel} @ mc_versions")
+    print(f"    {gate!r} has its minimum above its maximum: MSL refuses the range, so the structure "
+          f"fails to load")
+    return 1
 
 
 def _check_y_allowance(rel, stype: str, data: dict) -> int:
@@ -500,6 +517,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             n += _check_msl_types(subdir, rel, data, dv_range, used_types)
             if subdir == "structure" and isinstance(data, dict):
                 n += _check_height_fields(rel, data, ctx.mc_versions)
+                n += _check_mc_versions(rel, data)
             if subdir == "structure_set" and isinstance(data, dict):
                 salt_errors, salt_warns = _check_salt(rel, data)
                 n += salt_errors

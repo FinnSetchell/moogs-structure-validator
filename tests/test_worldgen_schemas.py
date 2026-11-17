@@ -1125,3 +1125,29 @@ def test_the_largest_int_salt_is_quiet(tmp_path, capsys):
     _write(tmp_path, "test", "structure_set", "tree.json", _salted_set(2 ** 31 - 1))
     passed, summary = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
     assert passed and "warning" not in summary, capsys.readouterr().out
+
+
+# --- MSL 4.0.0: a structure that generates only on some Minecraft versions -----------------
+
+@pytest.mark.parametrize("gate, ok", [("1.21.4-26.3", True), ("1.21.4", True), (" 1.21.4 - 26.3 ", True),
+                                      ("26.3-1.21.4", False), ("1.21.x", False), ("1.21.4-", False)])
+def test_a_structures_mc_versions_must_be_a_range_msl_reads(tmp_path, capsys, gate, ok):
+    for i, base in enumerate(({}, NETHER)):
+        _write(tmp_path, "test", "structure", f"s{i}.json",
+               _generic_structure(**base, mc_versions=gate, y_allowance={"min_y_allowed": 20}))
+    passed, _ = mod.run(FakeContext("test", ["1.21.4", "26.3"], tmp_path))
+    out = capsys.readouterr().out
+    assert passed == ok, out
+    if gate == "26.3-1.21.4":
+        assert "s0.json @ mc_versions\n    '26.3-1.21.4' has its minimum above its maximum" in out
+
+
+def test_a_structures_mc_versions_needs_msl_4_0_0(tmp_path, monkeypatch, capsys):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "structure", "s.json",
+           _generic_structure(mc_versions="1.21.4-26.3", y_allowance={"min_y_allowed": 20}))
+    _msl_mod(tmp_path, ">=3.4.0")
+    passed, _ = mod.run(FakeContext("test", ["1.21.1", "1.21.4"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert "moogs_structures:moogs_structures_generic_jigsaw_structure `mc_versions` first read by MSL 4.0.0" in out
