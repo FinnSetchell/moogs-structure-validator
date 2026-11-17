@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING
 import jsonschema
 
 import schemas.patcher
-from core.context import services
-from core.mcversions import DV_1_21, DV_VERSION_NAMES, BoundarySide, side_of
+from core.context import MSL_JIGSAW_STRUCTURES, services
+from core.mcversions import DV_1_21, DV_VERSION_NAMES, BoundarySide, parse_range, side_of
 
 if TYPE_CHECKING:
     from core.context import ValidatorContext
@@ -172,6 +172,19 @@ def _iter_pool_elements(data: dict):
     elements = data.get("elements")
     if isinstance(elements, list):
         yield from walk(elements, "")
+
+
+def _check_mc_versions(rel, data: dict) -> int:
+    """A structure's ``mc_versions`` range with its minimum above its maximum: MSL's
+    ``VersionResolver.parseRange`` refuses it, so the structure fails to load."""
+    gate = data.get("mc_versions") if data.get("type") in MSL_JIGSAW_STRUCTURES else None
+    parsed = parse_range("".join(gate.split())) if isinstance(gate, str) and gate.strip() else None
+    if parsed is None or parsed[0] <= parsed[1]:
+        return 0
+    print(f"  [structure] {rel} @ mc_versions")
+    print(f"    {gate!r} has its minimum above its maximum: MSL refuses the range, so the structure "
+          f"fails to load")
+    return 1
 
 
 def _check_y_allowance(rel, stype: str, data: dict) -> int:
@@ -330,6 +343,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
             n = _print_errors(validator, data, subdir, rel, "(root)")
             n += _check_msl_types(subdir, rel, data, dv_range)
+            if subdir == "structure" and isinstance(data, dict):
+                n += _check_mc_versions(rel, data)
             if n:
                 error_count += n
                 failed = True

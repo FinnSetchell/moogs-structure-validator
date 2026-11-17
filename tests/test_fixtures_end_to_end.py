@@ -1002,3 +1002,80 @@ def test_jigsaw_own_pool_missing_warns(tmp_path, monkeypatch, capsys):
     passed, _ = mod.run(ctx)
     assert passed
     assert "pool not found" in capsys.readouterr().out
+
+
+# ---------- MSL 4.0.0 structures that generate on some versions only ----------
+# A structure naming `mc_versions` has no biomes and is never placed on any other version,
+# so the pools only it reaches (the start pool, and those its pieces' jigsaw blocks name)
+# need to cover, and their pieces are wired for, its versions alone. MES's royal ships
+# ("1.21.4-26.3", pale oak) are the live case.
+
+ALL_1_21 = ["1.21", "1.21.1", "1.21.2", "1.21.3", "1.21.4", "1.21.5", "1.21.6", "1.21.7", "1.21.8",
+            "1.21.9", "1.21.10", "1.21.11"]
+
+
+def _gated_ship(tmp_path, monkeypatch, gate: str | None, shared: bool = False):
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch)
+    worldgen = root / "src" / "main" / "resources" / "data" / "test" / "worldgen" / "structure"
+    worldgen.mkdir(parents=True, exist_ok=True)
+    ship = {"type": "moogs_structures:moogs_structures_generic_jigsaw_structure", "start_pool": "test:ship/start"}
+    if gate is not None:
+        ship["mc_versions"] = gate
+    (worldgen / "ship.json").write_text(json.dumps(ship), encoding="utf-8")
+    if shared:
+        (worldgen / "raft.json").write_text(json.dumps({"type": "minecraft:jigsaw", "start_pool": "test:ship/side"}),
+                                            encoding="utf-8")
+    jigsaw = Compound({"pool": String("test:ship/side"), "name": String("test:a"), "target": String("test:b")})
+    save(structure_nbt(4189, blocks=[block_entry(0, nbt=jigsaw)],
+                       palette=[Compound({"Name": String("minecraft:jigsaw")})]), structures / "ship.nbt")
+    save(structure_nbt(4189), structures / "side.nbt")
+    _wire(pools / "ship" / "start.json", "test:ship", {"1.21.4-1.21.11": "test:ship"})
+    _wire(pools / "ship" / "side.json", "test:side", {"1.21.4-1.21.11": "test:side"})
+    return FakeContext("test", ALL_1_21, root), structures
+
+
+def test_pools_of_a_gated_structure_cover_its_versions_only(tmp_path, monkeypatch, capsys):
+    ctx, structures = _gated_ship(tmp_path, monkeypatch, "1.21.4-26.3")
+    from checks import check_version_coverage as mod
+    from core.context import services
+    passed, _ = mod.run(ctx)
+    assert passed, capsys.readouterr().out
+    svc = services(ctx)
+    for name in ("ship", "side"):
+        fr = svc.file_range(structures / f"{name}.nbt")
+        assert (fr.min_version, fr.max_version) == ("1.21.4", "1.21.11"), name
+
+
+def test_without_mc_versions_the_pools_cover_every_version(tmp_path, monkeypatch, capsys):
+    ctx, structures = _gated_ship(tmp_path, monkeypatch, None)
+    from checks import check_version_coverage as mod
+    from core.context import services
+    passed, _ = mod.run(ctx)
+    out = capsys.readouterr().out
+    assert not passed and out.count("versions not covered by any range: 1.21, 1.21.1, 1.21.2, 1.21.3") == 2, out
+    assert services(ctx).file_range(structures / "side.nbt").min_version == "1.21"
+
+
+def test_a_pool_an_ungated_structure_also_reaches_covers_every_version(tmp_path, monkeypatch, capsys):
+    ctx, _ = _gated_ship(tmp_path, monkeypatch, "1.21.4-26.3", shared=True)
+    from checks import check_version_coverage as mod
+    passed, _ = mod.run(ctx)
+    out = capsys.readouterr().out
+    assert not passed and "side.json[element 0]: versions not covered" in out, out
+    assert "start.json" not in out
+
+
+def test_a_piece_for_versions_the_gate_never_reaches_keeps_its_own_range(tmp_path, monkeypatch, capsys):
+    # MES's royal mobs: the ships generate from 1.21.4, and the mob pool still names its
+    # 1.21-1.21.1 file. That file serves no version here; it keeps the range written for it
+    # rather than the whole targeted range (which spans 1.21.5 and fails its JSON names).
+    ctx, structures = _gated_ship(tmp_path, monkeypatch, "1.21.4-26.3")
+    pools = structures.parent / "worldgen" / "template_pool"
+    _wire(pools / "ship" / "side.json", "test:side", {"1.21-1.21.1": "test:old_side", "1.21.2-1.21.11": "test:side"})
+    save(structure_nbt(3953), structures / "old_side.nbt")
+    from core.context import services
+    svc = services(ctx)
+    old, new = svc.file_range(structures / "old_side.nbt"), svc.file_range(structures / "side.nbt")
+    assert (old.min_version, old.max_version) == ("1.21", "1.21.1")
+    assert (new.min_version, new.max_version) == ("1.21.4", "1.21.11")

@@ -30,8 +30,7 @@ from typing import TYPE_CHECKING
 
 from checks.check_worldgen_schemas import _iter_pool_elements
 from core.context import Services, services
-from core.nbt import Structure
-from core.project import MSL_VERSIONED_ELEMENT, element_type, loc_to_path, namespaced, pool_locations
+from core.project import MSL_VERSIONED_ELEMENT, element_type, loc_to_path, namespaced
 
 if TYPE_CHECKING:
     from core.context import ValidatorContext
@@ -52,55 +51,6 @@ def _shapes_ground(adaptation) -> bool:
     if isinstance(size, int) and size // 2 == 0:
         return False
     return not (adaptation.get("top") == "none" and adaptation.get("bottom") == "none")
-
-
-def _jigsaw_pools(structure: Structure | None) -> set[str]:
-    if structure is None or structure.palette is None:
-        return set()
-    jigsaws = {i for i, name in enumerate(structure.palette_names()) if name == "minecraft:jigsaw"}
-    pools = set()
-    for _, _, _, block_nbt in structure.blocks_in_states(jigsaws):
-        pool = block_nbt.get("pool") if block_nbt is not None else None
-        if pool is not None:
-            pools.add(namespaced(str(pool)))
-    return pools
-
-
-def _structures_by_pool(svc: Services) -> dict[str, list[tuple[str, dict]]]:
-    """Each pool id, with every structure ``(file, data)`` whose generation reaches it."""
-    project, store = svc.project, svc.structures
-    ns, pool_dir = project.namespace, project.template_pool_dir
-    pools = {f"{ns}:{path.relative_to(pool_dir).with_suffix('').as_posix()}": data
-             for path, data in project.pools()}
-    edges: dict[str, set[str]] = {}
-
-    def next_pools(pool_id: str) -> set[str]:
-        if pool_id not in edges:
-            data = pools.get(pool_id) or {}
-            found = {namespaced(data["fallback"])} if isinstance(data.get("fallback"), str) else set()
-            for location in pool_locations(data):
-                path = loc_to_path(namespaced(location), ns, store.dir, ".nbt")
-                if path is not None and path.exists():
-                    found |= _jigsaw_pools(store.try_load(path))
-            edges[pool_id] = found
-        return edges[pool_id]
-
-    reached: dict[str, list[tuple[str, dict]]] = {}
-    structure_dir = project.worldgen_structure_dir
-    for path, data in project.json_dicts(structure_dir):
-        start = data.get("start_pool")
-        if not isinstance(start, str):
-            continue
-        seen = {namespaced(start)}
-        todo = list(seen)
-        while todo:
-            for pool_id in next_pools(todo.pop()) - seen:
-                seen.add(pool_id)
-                todo.append(pool_id)
-        file = f"structure/{path.relative_to(structure_dir).as_posix()}"
-        for pool_id in seen:
-            reached.setdefault(pool_id, []).append((file, data))
-    return reached
 
 
 def _names(structures: list[tuple[str, dict]]) -> str:
@@ -151,7 +101,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         print("  no adaptation areas")
         return True, "no adaptation areas"
 
-    reached = _structures_by_pool(svc)
+    reached = svc.structures_by_pool()
     warnings: list[str] = []
     for file, where, pool_id, element in areas:
         area = element["adaptation_area"]
