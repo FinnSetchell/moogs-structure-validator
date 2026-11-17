@@ -2,10 +2,15 @@
 
 At 1.21.5 ``ArmorItems``/``HandItems`` (and the drop-chance lists, body armor
 and saddle slots) were absorbed into the ``equipment`` and ``drop_chances``
-compounds. A legacy key on a 1.21.5+ target is silently dropped equipment; a
-new key on a pre-1.21.5 target is ignored data; a range spanning 1.21.5 cannot
-be right on both sides. Only ``minecraft:`` entities are checked. Every item in
-every slot must also exist in the item registry at the file's minimum version.
+compounds. The game loads a structure file through its data fixer from the
+file's own DataVersion, and the 1.21.5 fixes (``DropChancesFormatFix``,
+``SaddleEquipmentSlotFix``, ``EquipmentFormatFix``, DataVersions 4293 to 4301)
+move the legacy keys, items included, into the new ones. So a legacy key is
+right from the file's own version upward, and wrong only in a file saved at
+1.21.5 or later, where no fix runs and the equipment is dropped. A new key wired
+below 1.21.5 is ignored there: older versions cannot read it, and nothing
+downgrades data. Only ``minecraft:`` entities are checked. Every item in every
+slot must also exist in the item registry at the file's minimum version.
 """
 from __future__ import annotations
 
@@ -73,6 +78,9 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             continue
         min_version, max_version, min_dv, max_dv = fr.min_version, fr.max_version, fr.min_dv, fr.max_dv
         side = side_of(min_dv, max_dv, DV_1_21_5)
+        file_dv = structure.data_version
+        # No DataVersion reads as the oldest one, so the game upgrades the file too.
+        fixed_on_load = file_dv is None or file_dv < DV_1_21_5
 
         for entity, path in structure.walk_entities():
             id_tag = entity.get("id")
@@ -83,31 +91,23 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                 continue
             entities_checked += 1
 
-            if side == BoundarySide.NEW:
+            if side != BoundarySide.OLD and not fixed_on_load:
                 for key in _PRE_1_21_5_KEYS:
                     if key in entity:
                         errors.append(
                             f"[ERROR] {rel}: {path} (entity {entity_id!r}) has legacy key"
-                            f" `{key}` on a min>=1.21.5 target ({min_version}, DV {min_dv});"
-                            f" this equipment is silently dropped at 1.21.5+"
+                            f" `{key}` in a file saved at DataVersion {file_dv} (1.21.5 or later),"
+                            f" wired up to {max_version}; no data fix upgrades it, so this equipment"
+                            f" is silently dropped at 1.21.5+"
                         )
-            elif side == BoundarySide.OLD:
+            if side != BoundarySide.NEW:
                 for key in _POST_1_21_5_KEYS:
                     if key in entity:
                         errors.append(
                             f"[ERROR] {rel}: {path} (entity {entity_id!r}) has 1.21.5+ key"
-                            f" `{key}` on a max<1.21.5 target ({max_version}, DV {max_dv});"
-                            f" pre-1.21.5 clients ignore this data"
+                            f" `{key}` but is wired down to {min_version} (DV {min_dv});"
+                            f" versions before 1.21.5 ignore this data"
                         )
-            else:
-                for key in _PRE_1_21_5_KEYS + _POST_1_21_5_KEYS:
-                    if key in entity:
-                        errors.append(
-                            f"[ERROR] {rel}: {path} (entity {entity_id!r}) has boundary-sensitive"
-                            f" key `{key}` but wired range {min_version}..{max_version} spans"
-                            f" 1.21.5; no single file can be correct on both sides"
-                        )
-                        break  # one message per spanning entity is enough
 
             valid_items = valid_items_for(min_version)
             for slot_desc, item in entity_items(entity, "", _LIST_SLOTS, _COMPOUND_SLOTS, True):

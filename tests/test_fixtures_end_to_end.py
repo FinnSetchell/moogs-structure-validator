@@ -93,6 +93,61 @@ def test_equipment_correct_shape_passes(tmp_path, monkeypatch, capsys):
     assert passed
 
 
+# The game loads a structure through its data fixer from the file's own DataVersion, and
+# the 1.21.5 fixes move legacy equipment keys, items included, into `equipment`: a legacy
+# key is right from its own version upward. Only a new key wired below 1.21.5 is broken.
+
+ALL_1_21 = ["1.21", "1.21.1", "1.21.2", "1.21.3", "1.21.4", "1.21.5", "1.21.6", "1.21.7", "1.21.8",
+            "1.21.9", "1.21.10", "1.21.11"]
+ARMOR_STAND = Compound({
+    "id": String("minecraft:armor_stand"),
+    "ArmorItems": List[Compound]([Compound({}), Compound({}),
+                                  Compound({"id": String("minecraft:iron_chestplate"), "count": Int(1)}),
+                                  Compound({"id": String("minecraft:iron_helmet"), "count": Int(1)})]),
+})
+PIG = Compound({"id": String("minecraft:pig"), "Saddle": Byte(1)})
+NEW_FORM_ZOMBIE = Compound({
+    "id": String("minecraft:zombie"),
+    "equipment": Compound({"mainhand": Compound({"id": String("minecraft:iron_sword"), "count": Int(1)})}),
+})
+
+
+def _equipment_run(tmp_path, monkeypatch, entity: Compound, dv: int, wired: str, versions: list[str]):
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, entities={"minecraft:zombie", "minecraft:pig", "minecraft:armor_stand"},
+                    items={"minecraft:iron_sword", "minecraft:iron_chestplate", "minecraft:iron_helmet"})
+    save(structure_nbt(dv, entities=[entity_entry(entity)]), structures / "e.nbt")
+    _wire(pools / "p.json", "test:e", {wired: "test:e"})
+    from checks import check_entity_equipment_shape as mod
+    return mod.run(FakeContext("test", versions, root))
+
+
+def test_legacy_equipment_saved_before_1_21_5_and_wired_across_it_passes(tmp_path, monkeypatch, capsys):
+    # MMV's armor_stand_1 (filled ArmorItems) and pigs_1 (Saddle), saved at 1.21.
+    for name, entity in (("armor", ARMOR_STAND), ("pig", PIG)):
+        passed, _ = _equipment_run(tmp_path / name, monkeypatch, entity, 3953, "1.21-1.21.11", ALL_1_21)
+        assert passed, capsys.readouterr().out
+
+
+def test_legacy_equipment_saved_before_1_21_5_on_a_1_21_5_target_passes(tmp_path, monkeypatch, capsys):
+    passed, _ = _equipment_run(tmp_path, monkeypatch, ARMOR_STAND, 4189, "1.21.5-1.21.11", ALL_1_21[5:])
+    assert passed, capsys.readouterr().out
+
+
+def test_legacy_equipment_saved_at_1_21_5_and_wired_across_it_fails(tmp_path, monkeypatch, capsys):
+    passed, _ = _equipment_run(tmp_path, monkeypatch, ARMOR_STAND, 4325, "1.21-1.21.11", ALL_1_21)
+    out = capsys.readouterr().out
+    assert not passed
+    assert "legacy key `ArmorItems` in a file saved at DataVersion 4325 (1.21.5 or later)" in out, out
+
+
+def test_new_equipment_wired_across_1_21_5_fails(tmp_path, monkeypatch, capsys):
+    passed, _ = _equipment_run(tmp_path, monkeypatch, NEW_FORM_ZOMBIE, 4325, "1.21-1.21.11", ALL_1_21)
+    out = capsys.readouterr().out
+    assert not passed
+    assert "has 1.21.5+ key `equipment` but is wired down to 1.21 (DV 3953)" in out, out
+
+
 # ---------- check_book_contents ----------
 
 def test_book_json_string_page_on_1_21_5_fails(tmp_path, monkeypatch):
