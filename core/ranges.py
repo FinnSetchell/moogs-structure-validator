@@ -5,7 +5,8 @@ A structure is saved on one version and then converted per version, so the
 template pool that references it: a plain element serves every targeted version,
 and an MSL ``versioned_single_pool_element`` maps version ranges to files. This
 module turns the pools into a ``(min, max)`` target range per NBT path, which is
-what every version-sensitive check gates on.
+what every version-sensitive check gates on. A pool only structures with their own
+``mc_versions`` reach (MSL 4.0.0) serves only the versions they generate on.
 """
 from __future__ import annotations
 
@@ -66,7 +67,8 @@ def collect_versioned_elements(project: Project) -> list[PoolCoverage]:
     return result
 
 
-def build_nbt_version_ranges(project: Project, mc_versions: list[str]) -> dict[Path, NBTVersionInfo]:
+def build_nbt_version_ranges(project: Project, mc_versions: list[str],
+                             pool_versions: dict[str, list[str]] | None = None) -> dict[Path, NBTVersionInfo]:
     """``(min, max)`` target version for every NBT a pool references.
 
     * A versioned ref contributes each range's low/high.
@@ -74,6 +76,8 @@ def build_nbt_version_ranges(project: Project, mc_versions: list[str]) -> dict[P
       versions no range covers, and stretches that file's range to include them.
     * An unversioned ref (plain element) serves the whole targeted range.
     * A file referenced both ways takes the widest of everything.
+    * In a pool ``pool_versions`` lists, all of these count only the versions the
+      pool is generated on.
     """
     global_min = parse_version(min(mc_versions, key=parse_version))
     global_max = parse_version(max(mc_versions, key=parse_version))
@@ -90,7 +94,10 @@ def build_nbt_version_ranges(project: Project, mc_versions: list[str]) -> dict[P
         if path not in highs or high > highs[path]:
             highs[path] = high
 
-    for _, data in project.pools():
+    for json_path, data in project.pools():
+        pool_id = f"{ns}:{json_path.relative_to(project.template_pool_dir).with_suffix('').as_posix()}"
+        gate = (pool_versions or {}).get(pool_id)
+        served = mc_versions if gate is None else gate
         for entry in data.get("elements", []):
             element = entry.get("element", {})
             if element_type(element) == MSL_VERSIONED_ELEMENT:
@@ -103,14 +110,21 @@ def build_nbt_version_ranges(project: Project, mc_versions: list[str]) -> dict[P
                     if low > high:
                         continue  # inverted: the coverage check reports it
                     nbt_path = loc_to_path(loc, ns, structures_dir, ".nbt")
-                    if nbt_path is not None:
+                    if nbt_path is None:
+                        continue
+                    covered = [parse_version(v) for v in gate or () if version_in_range(v, range_key)]
+                    if covered:
+                        bump(nbt_path, min(covered), max(covered))
+                    else:
+                        # Ungated, or a range the gate never reaches: the file keeps the
+                        # range it is written for rather than the whole targeted range.
                         bump(nbt_path, low, high)
                 default_loc = element.get("location")
                 if default_loc:
                     nbt_path = loc_to_path(default_loc, ns, structures_dir, ".nbt")
                     if nbt_path is not None:
                         uncovered = [
-                            parse_version(v) for v in mc_versions
+                            parse_version(v) for v in served
                             if not any(version_in_range(v, rk) for rk in locations)
                         ]
                         if uncovered:
@@ -119,8 +133,13 @@ def build_nbt_version_ranges(project: Project, mc_versions: list[str]) -> dict[P
                 loc = element.get("location")
                 if loc:
                     nbt_path = loc_to_path(loc, ns, structures_dir, ".nbt")
-                    if nbt_path is not None:
+                    if nbt_path is None:
+                        continue
+                    if gate is None:
                         unversioned.add(nbt_path)
+                    else:
+                        bump(nbt_path, parse_version(min(gate, key=parse_version)),
+                             parse_version(max(gate, key=parse_version)))
 
     result: dict[Path, NBTVersionInfo] = {}
     for path in set(lows) | set(highs) | unversioned:

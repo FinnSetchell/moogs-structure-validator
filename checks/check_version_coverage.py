@@ -3,10 +3,13 @@
 A version no range covers falls back to the element's default ``location``,
 which is almost always a file in the wrong format for that version. Malformed
 and inverted range keys are errors; overlapping ranges warn, because first
-match wins and the second range silently never fires.
+match wins and the second range silently never fires. A pool that only
+structures with their own ``mc_versions`` reach (MSL 4.0.0) needs to cover only
+the versions those structures generate on.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from core.context import services
@@ -18,7 +21,8 @@ if TYPE_CHECKING:
 
 
 def run(ctx: ValidatorContext) -> tuple[bool, str]:
-    project = services(ctx).project
+    svc = services(ctx)
+    project = svc.project
     if not project.template_pool_dir.exists() or not project.structures_dir.exists():
         return True, "no template_pool/structures directory"
 
@@ -51,8 +55,10 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
                 if l1 <= h2 and l2 <= h1:
                     warn_msgs.append(f"[WARN] {loc_desc}: overlapping ranges '{k1}' and '{k2}'")
 
+        pool_id = f"{project.namespace}:{Path(cov.pool_rel).with_suffix('').as_posix()}"
+        served = svc.pool_versions().get(pool_id, ctx.mc_versions)
         uncovered = [
-            v for v in ctx.mc_versions
+            v for v in served
             if not any(version_in_range(v, k) for k, _, _ in parsed_ranges)
         ]
         if uncovered:

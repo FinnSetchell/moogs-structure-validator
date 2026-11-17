@@ -30,7 +30,7 @@ import jsonschema
 
 import schemas.patcher
 from core.context import services
-from core.mcversions import DV_1_21, DV_VERSION_NAMES, BoundarySide, parse_version, side_of
+from core.mcversions import DV_1_21, DV_VERSION_NAMES, BoundarySide, parse_range, parse_version, side_of
 
 if TYPE_CHECKING:
     from core.context import ValidatorContext
@@ -219,6 +219,19 @@ def _version_runs(versions: list[str], order: list[str]) -> str:
     return ", ".join(r[0] if len(r) == 1 else f"{r[0]}-{r[-1]}" for r in runs)
 
 
+def _check_mc_versions(rel, data: dict) -> int:
+    """A structure's ``mc_versions`` range with its minimum above its maximum: MSL's
+    ``VersionResolver.parseRange`` refuses it, so the structure fails to load."""
+    gate = data.get("mc_versions") if data.get("type") in _HEIGHT_TYPES else None
+    parsed = parse_range("".join(gate.split())) if isinstance(gate, str) and gate.strip() else None
+    if parsed is None or parsed[0] <= parsed[1]:
+        return 0
+    print(f"  [structure] {rel} @ mc_versions")
+    print(f"    {gate!r} has its minimum above its maximum: MSL refuses the range, so the structure "
+          f"fails to load")
+    return 1
+
+
 def _check_y_allowance(rel, stype: str, data: dict) -> int:
     allowance = data.get("y_allowance")
     if not isinstance(allowance, dict):
@@ -377,6 +390,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             n += _check_msl_types(subdir, rel, data, dv_range)
             if subdir == "structure" and isinstance(data, dict):
                 n += _check_height_fields(rel, data, ctx.mc_versions)
+                n += _check_mc_versions(rel, data)
             if n:
                 error_count += n
                 failed = True

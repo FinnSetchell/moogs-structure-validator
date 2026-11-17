@@ -829,3 +829,18 @@ def test_a_land_search_direction_msl_cannot_read_fails(tmp_path, capsys):
     passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
     out = capsys.readouterr().out
     assert not passed and "s.json @ land_search_direction" in out, out
+
+
+# --- MSL 4.0.0: a structure that generates only on some Minecraft versions -----------------
+
+@pytest.mark.parametrize("gate, ok", [("1.21.4-26.3", True), ("1.21.4", True), (" 1.21.4 - 26.3 ", True),
+                                      ("26.3-1.21.4", False), ("1.21.x", False), ("1.21.4-", False)])
+def test_a_structures_mc_versions_must_be_a_range_msl_reads(tmp_path, capsys, gate, ok):
+    for i, base in enumerate(({}, NETHER)):
+        _write(tmp_path, "test", "structure", f"s{i}.json",
+               _generic_structure(**base, mc_versions=gate, y_allowance={"min_y_allowed": 20}))
+    passed, _ = mod.run(FakeContext("test", ["1.21.4", "26.3"], tmp_path))
+    out = capsys.readouterr().out
+    assert passed == ok, out
+    if gate == "26.3-1.21.4":
+        assert "s0.json @ mc_versions\n    '26.3-1.21.4' has its minimum above its maximum" in out
