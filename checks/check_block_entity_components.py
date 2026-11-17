@@ -45,6 +45,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     store = svc.structures
     if not store.dir.exists():
         return True, "no structures directory"
+    if (refused := svc.refuse_unknown_versions()) is not None:
+        return refused
 
     version_map = svc.versions
     if not version_map:

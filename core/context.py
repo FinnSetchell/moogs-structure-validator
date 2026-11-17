@@ -73,7 +73,22 @@ class Services:
     # -- versions
     @property
     def versions(self) -> VersionIndex:
-        return self.mcmeta.versions
+        # Refetched once when mc_versions names a release the cached index predates.
+        return self.mcmeta.versions_knowing(self.mc_versions)
+
+    def refuse_unknown_versions(self) -> tuple[bool, str] | None:
+        """A failing result when ``mc_versions`` names a release the version index
+        does not know (a typo, or one newer than mcmeta): no file range reaching it
+        resolves, so a check would skip every such file and pass on nothing. None
+        when every version is known, or when there is no index at all."""
+        idx = self.versions
+        unknown = [v for v in self.mc_versions if idx.get(v) is None]
+        if not unknown or not idx:
+            return None
+        names = ", ".join(unknown)
+        print(f"  [ERROR] validator.json lists {names}, which the version index does not know, so no "
+              f"structure file wired to it can be checked")
+        return False, f"unknown version(s) in validator.json: {names}"
 
     @property
     def global_min(self) -> str:

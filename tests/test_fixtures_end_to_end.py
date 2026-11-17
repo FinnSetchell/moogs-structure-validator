@@ -4,13 +4,16 @@ a check module's `run` against a FakeContext, asserting on the returned
 (passed, summary) tuple and the check's exit signal."""
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 
 import nbtlib
+import pytest
 from nbtlib import Byte, Compound, Double, Int, List, String
 
 from tests.nbt_helpers import (
+    VANILLA_VERSION_MAP,
     FakeContext,
     build_datapack,
     entity_entry,
@@ -18,6 +21,7 @@ from tests.nbt_helpers import (
     save,
     stub_registries,
     structure_nbt,
+    version_entries,
     versioned_element,
     write_pool,
 )
@@ -1070,3 +1074,42 @@ def test_jigsaw_own_pool_missing_warns(tmp_path, monkeypatch, capsys):
     passed, _ = mod.run(ctx)
     assert passed
     assert "pool not found" in capsys.readouterr().out
+
+
+# ---------- an unknown version in validator.json ----------
+# A release the version index does not know resolves no file range reaching it, so these
+# checks skipped every file and passed on "0 checked" (MMV with 26.3 before mcmeta had it).
+
+
+FILE_CHECKS = ["check_attribute_ids", "check_block_entity_components", "check_book_contents",
+               "check_entity_equipment_shape", "check_entity_nbt_keys", "check_item_format",
+               "check_potion_effects", "check_text_components"]
+
+
+def _armor_stand_pack(tmp_path, monkeypatch, versions: list[str], version_map=None):
+    root, structures, pools = build_datapack(tmp_path)
+    stub_registries(monkeypatch, entities={"minecraft:armor_stand"},
+                    items={"minecraft:iron_chestplate", "minecraft:iron_helmet"}, version_map=version_map)
+    save(structure_nbt(3953, entities=[entity_entry(ARMOR_STAND)]), structures / "e.nbt")
+    _wire(pools / "p.json", "test:e", {f"{versions[0]}-{versions[-1]}": "test:e"})
+    return FakeContext("test", versions, root)
+
+
+@pytest.mark.parametrize("check", FILE_CHECKS)
+def test_an_unknown_version_fails_instead_of_checking_nothing(tmp_path, monkeypatch, capsys, check):
+    ctx = _armor_stand_pack(tmp_path, monkeypatch, ["1.21.10", "1.21.11", "26.9"])
+    passed, summary = importlib.import_module(f"checks.{check}").run(ctx)
+    out = capsys.readouterr().out
+    assert not passed and summary == "unknown version(s) in validator.json: 26.9", out
+    assert "[ERROR] validator.json lists 26.9, which the version index does not know" in out
+
+
+def test_a_release_newer_than_the_cached_index_is_refetched(tmp_path, monkeypatch, capsys):
+    from core import mcmeta
+    ctx = _armor_stand_pack(tmp_path, monkeypatch, ["1.21.10", "1.21.11", "26.1"])
+    fresh = {**VANILLA_VERSION_MAP, "26.1": 4671}
+    monkeypatch.setattr(mcmeta, "fetch_version_entries",
+                        lambda cache_dir, refresh: version_entries(fresh if refresh else None))
+    from checks import check_entity_equipment_shape as mod
+    passed, summary = mod.run(ctx)
+    assert passed and summary == "1 files, 1 entities checked", capsys.readouterr().out
