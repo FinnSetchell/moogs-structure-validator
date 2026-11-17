@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from checks import check_msl_replace_vanilla as mod
 from tests.nbt_helpers import FakeContext
 
@@ -227,6 +229,70 @@ def test_options_not_an_object_fails(tmp_path):
 def test_options_null_fails(tmp_path):
     passed, _ = _run_with_options(tmp_path, None)
     assert not passed
+
+
+# ---------- another mod's structure as the target ----------
+# MSL replaces any structure id, another mod's included, and only when that mod is
+# installed (Fortress Reimagined replaces Nether Structures' mega fortress).
+
+RES = Path("src") / "main" / "resources"
+FABRIC = RES / "fabric.mod.json"
+NEOFORGE = RES / "META-INF" / "neoforge.mods.toml"
+
+
+def _modded_target(tmp_path, target: str = "mns:mega_fortress"):
+    _write_structure(tmp_path, "test:x")
+    _write_manifest(tmp_path, {"structures": {"mod_slug": "test"},
+                               "presets": [_preset("other_mod", target, "test:x")]})
+
+
+@pytest.mark.parametrize("loader_files", [
+    {FABRIC: {"id": "test", "suggests": {"mns": "*"}}},
+    {FABRIC: {"id": "test", "depends": {"moogs_structures": ">=4.0.0", "mns": "*"}}},
+    {RES / "quilt.mod.json": {"quilt_loader": {"depends": [{"id": "mns", "optional": True}]}}},
+    {NEOFORGE: '[[dependencies.test]]\nmodId = "moogs_structures"\ntype = "required"\n\n'
+               '[[dependencies.test]]\n    modId="mns"\n    type="optional"\n'},
+])
+def test_another_mods_structure_named_as_a_dependency_passes_quietly(tmp_path, capsys, loader_files):
+    _modded_target(tmp_path)
+    for rel, data in loader_files.items():
+        if isinstance(data, str):
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel).write_text(data, encoding="utf-8")
+        else:
+            _write_json(tmp_path / rel, data)
+    passed, summary = mod.run(_ctx(tmp_path))
+    out = capsys.readouterr().out
+    assert passed and summary.endswith("all valid"), out
+
+
+def test_another_mods_structure_no_loader_file_names_warns(tmp_path, capsys):
+    _modded_target(tmp_path)
+    _write_json(tmp_path / FABRIC, {"id": "test", "depends": {"moogs_structures": ">=4.0.0"}})
+    (tmp_path / NEOFORGE).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / NEOFORGE).write_text('[[dependencies.test]]\nmodId = "moogs_structures"\n', encoding="utf-8")
+    passed, summary = mod.run(_ctx(tmp_path))
+    out = capsys.readouterr().out
+    assert passed and summary == "0 errors, 1 warning(s)", out
+    assert ("[WARN] presets[0].replacements[0].vanilla_structure = 'mns:mega_fortress': another mod's "
+            "structure, replaced only when that mod is installed, and no loader file names 'mns'") in out
+
+
+def test_another_mods_structure_in_a_plain_datapack_passes(tmp_path, capsys):
+    # No loader files: nowhere to name a dependency, so nothing to warn about.
+    _modded_target(tmp_path)
+    passed, summary = mod.run(_ctx(tmp_path))
+    assert passed and summary.endswith("all valid"), capsys.readouterr().out
+
+
+def test_own_structure_as_the_target_must_exist(tmp_path, capsys):
+    _modded_target(tmp_path, "test:old_fortress")
+    passed, _ = mod.run(_ctx(tmp_path))
+    out = capsys.readouterr().out
+    assert not passed
+    assert "vanilla_structure = 'test:old_fortress': no worldgen/structure JSON found" in out
+    _write_structure(tmp_path, "test:old_fortress")
+    assert mod.run(_ctx(tmp_path))[0]
 
 
 # ---------- tag hookups (warnings only) ----------
