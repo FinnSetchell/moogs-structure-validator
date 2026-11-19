@@ -140,7 +140,9 @@ def _print_errors(validator: jsonschema.Draft4Validator, data, subdir: str, rel,
     for error in errors:
         path_str = " > ".join(str(p) for p in error.absolute_path) if error.absolute_path else where
         print(f"  [{subdir}] {rel} @ {path_str}")
-        print(f"    {error.message}")
+        # A broken "not" rule says why in its description; its own message repeats the whole file.
+        explained = error.validator == "not" and isinstance(error.validator_value, dict) and error.validator_value.get("description")
+        print(f"    {explained or error.message}")
     return len(errors)
 
 

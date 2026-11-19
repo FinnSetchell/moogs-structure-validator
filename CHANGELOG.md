@@ -1,5 +1,10 @@
 # changelog
 
+## Unreleased
+
+### Added
+- `burying_type` on Nether structures: only `LOWEST_CORNER`, never with `FIXED_HEIGHT`
+
 ## v1.12.0 -- 2026-09-24
 
 ### Added
