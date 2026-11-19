@@ -13,8 +13,9 @@ since with an older MSL the file names an unregistered type and fails to load
 (``_MSL_TYPE_SINCE``). The same goes for a field MSL added to a type later
 (``_MSL_FIELD_SINCE``): an older MSL skips it without a word, so what it sets is
 lost there. And for a value MSL accepts in a field only from a later release
-(``_MSL_VALUE_SINCE``): an older MSL cannot read it. A field some Minecraft line
-of MSL never reads, in any release, warns on those versions (``_MSL_FIELD_WINDOWS``).
+(``_MSL_VALUE_SINCE``): an older MSL cannot read it. A field MSL's 1.20 lines
+read from a later release than its 1.21 lines needs that release on 1.20-1.20.6
+(``_MSL_FIELD_SINCE_ON_1_20``).
 
 Height limits are read per Minecraft line, in every MSL release: the 1.20 builds read
 top-level ``min_y_allowed``, ``max_y_allowed`` and ``allowed_y_range_from_start``, the
@@ -168,16 +169,13 @@ _MSL_VALUE_SINCE: dict[tuple[str, str, str], tuple[int, int, int]] = {
         (4, 1, 0),
 }
 
-# Fields MSL reads on some Minecraft lines only, in every release: (first DataVersion
-# read, first DataVersion no longer read, what is lost), as _MSL_TYPE_WINDOWS. No
-# release of MSL's 1.20 lines (1.20-1.20.4 and 1.20.5-1.20.6, 3.0.0 to 3.4.x) reads a
-# versioned element's own terrain adaptation; the 1.21 lines do from 3.0.0. Raising
-# the minimum cannot help there, so it warns instead of failing.
-_MSL_FIELD_WINDOWS: dict[tuple[str, str], tuple[int | None, int | None, str]] = {
-    ("moogs_structures:versioned_single_pool_element", "enhanced_terrain_adaptation"): (
-        DV_1_21, None,
-        "MSL's 1.20 lines skip it on this pool element, so those pieces get no carving of their own "
-        "there; the structure-wide carving (the structure's own enhanced_terrain_adaptation) still applies"),
+# Fields MSL's 1.20 lines (Minecraft 1.20-1.20.6) read from a later release than
+# _MSL_FIELD_SINCE gives for the 1.21 lines. A versioned element's own terrain
+# adaptation: the 1.21 lines read it from 3.0.0; the 1.20 lines from 3.4.2 (MSL commit
+# 50b0520, first in tags 3.4.2-fabric/forge/neoforge). Before that the 1.20 builds had
+# no per-piece override (3.4.0-1.20 and -1.20.5) or read it only `//? if >=1.21.1` (3.4.1).
+_MSL_FIELD_SINCE_ON_1_20: dict[tuple[str, str], tuple[int, int, int]] = {
+    ("moogs_structures:versioned_single_pool_element", "enhanced_terrain_adaptation"): (3, 4, 2),
 }
 
 _schema_cache: dict[str, dict] = {}
@@ -530,7 +528,6 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
     if n_msl:
         error_count += n_msl
         failed = True
-    warn_count = _check_msl_field_windows(ctx, svc, used_types) + salt_warnings
 
     total = sum(counts.values())
     count_str = "  ".join(f"{k}: {v}" for k, v in counts.items() if v > 0)
@@ -543,50 +540,18 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
         print(f"  ({count_str})")
 
     summary = f"{total} files, 0 errors" if error_count == 0 else f"{total} files, {error_count} error(s)"
-    if warn_count:
-        summary += f", {warn_count} warning(s)"
+    if salt_warnings:
+        summary += f", {salt_warnings} warning(s)"
     return not failed, summary
 
 
-def _window_has(key, version_dv: int | None) -> bool:
-    """Whether MSL reads a type (``type_id``), a field (``(type_id, field)``) or a
-    field's value (``(type_id, field, value)``) on a version at all: its MC window, in
-    any release."""
-    if version_dv is None:
+def _window_has(type_id: str, version_dv: int | None) -> bool:
+    """Whether MSL registers ``type_id`` on a version at all (its MC window)."""
+    window = _MSL_TYPE_WINDOWS.get(type_id)
+    if window is None or version_dv is None:
         return True
-    if not isinstance(key, str):
-        field = _MSL_FIELD_WINDOWS.get(key[:2])
-        if field is not None and not _in_window(field[0], field[1], version_dv):
-            return False
-        key = key[0]
-    window = _MSL_TYPE_WINDOWS.get(key)
-    return window is None or _in_window(window[0], window[1], version_dv)
-
-
-def _in_window(added, removed, version_dv: int) -> bool:
+    added, removed = window
     return (added is None or version_dv >= added) and (removed is None or version_dv < removed)
-
-
-def _check_msl_field_windows(ctx, svc, used: dict) -> int:
-    """Warnings for fields no release of MSL reads on some targeted versions."""
-    index = svc.versions if any(k in used for k in _MSL_FIELD_WINDOWS) else None
-    if index is None:
-        return 0
-    order = sorted((v for v in ctx.mc_versions if parse_version(v)), key=parse_version)
-    warns = 0
-    for key, (added, removed, why) in sorted(_MSL_FIELD_WINDOWS.items()):
-        if key not in used:
-            continue
-        skipped = [v for v in order if index.get(v) is not None and _window_has(key[0], index.get(v))
-                   and not _in_window(added, removed, index.get(v))]
-        if not skipped:
-            continue
-        warns += 1
-        files = sorted(used[key])
-        more = f" (+{len(files) - 3} more)" if len(files) > 3 else ""
-        print(f"  [WARN] {key[0]} `{key[1]}` is skipped on {_version_runs(skipped, order)}")
-        print(f"    {why}. In {', '.join(files[:3])}{more}.")
-    return warns
 
 
 def _check_msl_releases(ctx, svc, used: dict) -> int:
@@ -606,12 +571,15 @@ def _check_msl_releases(ctx, svc, used: dict) -> int:
     for key, since in sorted(floored.items(), key=lambda kv: str(kv[0])):
         type_id = key if isinstance(key, str) else key[0]
         short = []
+        top = since   # the release every short version needs
         for v in order:
-            if not _window_has(key, index.get(v) if index else None):
+            if not _window_has(type_id, index.get(v) if index else None):
                 continue
+            need = _MSL_FIELD_SINCE_ON_1_20.get(key, since) if parse_version(v) < (1, 21) else since
             eff = builds.effective(v, declared)
-            if eff is not None and eff < since:
+            if eff is not None and eff < need:
                 short.append((v, eff))
+                top = max(top, need)
         if not short:
             continue
         errors += 1
@@ -627,8 +595,10 @@ def _check_msl_releases(ctx, svc, used: dict) -> int:
                   f"to {msl_upgrade.fmt(since)}{_fabric_hint(since)}.")
         elif len(key) == 3:
             named = f"{', '.join(files[:3])}{more}"
-            dropped = [] if _required(type_id, key[1]) else [v for v, _ in short
-                                                              if parse_version(v) < (1, 20, 5)]
+            unread = _MSL_FIELD_SINCE_ON_1_20.get(key[:2])   # below it, 1.20 skips the whole field
+            dropped = [v for v, e in short
+                       if (unread and parse_version(v) < (1, 21) and e < unread)
+                       or (not _required(type_id, key[1]) and parse_version(v) < (1, 20, 5))]
             fails = [v for v, _ in short if v not in dropped]
             effects = [f"{named} fail to load on {_version_runs(fails, order)}"] if fails else []
             if dropped:
@@ -638,10 +608,13 @@ def _check_msl_releases(ctx, svc, used: dict) -> int:
             print(f"    on {runs} {allows}, which cannot read it: {'; '.join(effects)}. Raise the "
                   f"moogs_structures minimum to {msl_upgrade.fmt(since)}{_fabric_hint(since)}.")
         else:
-            print(f"  [msl] {type_id} `{key[1]}` first read by MSL {msl_upgrade.fmt(since)}")
+            first = msl_upgrade.fmt(since)
+            if top != since:
+                first += f" ({msl_upgrade.fmt(top)} on its 1.20 lines)"
+            print(f"  [msl] {type_id} `{key[1]}` first read by MSL {first}")
             print(f"    on {runs} {allows}, which skips it without a word, so "
                   f"{', '.join(files[:3])}{more} lose what it sets there. Raise the moogs_structures "
-                  f"minimum to {msl_upgrade.fmt(since)}{_fabric_hint(since)}.")
+                  f"minimum to {msl_upgrade.fmt(top)}{_fabric_hint(top)}.")
     return errors
 
 

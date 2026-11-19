@@ -869,21 +869,32 @@ VERSIONED_WITH_CARVING = {"element_type": "moogs_structures:versioned_single_poo
                                                           "top": "carve", "bottom": "none"}}
 
 
-def test_per_piece_carving_on_1_20_warns_and_passes(tmp_path, monkeypatch, capsys):
-    # No release of MSL's 1.20 lines reads a versioned element's own carving: it warns
-    # on 1.20-1.20.6 only, and the check still passes.
+def test_per_piece_carving_on_1_20_needs_msl_3_4_2(tmp_path, monkeypatch, capsys):
+    # MSL's 1.21 lines read a versioned element's own carving from 3.0.0, its 1.20 lines
+    # only from 3.4.2: with 3.3.0 allowed, the 1.20 pieces lose it and 1.21 keeps it.
     stub_registries(monkeypatch)
     _write(tmp_path, "test", "template_pool", "start.json", _pool([VERSIONED_WITH_CARVING]))
     _msl_mod(tmp_path, ">=3.3.0")
+    passed, _ = mod.run(FakeContext("test", ["1.20.4", "1.20.6", "1.21", "1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert ("versioned_single_pool_element `enhanced_terrain_adaptation` first read by MSL 3.0.0 "
+            "(3.4.2 on its 1.20 lines)") in out
+    assert "on 1.20.4-1.20.6 this mod allows MSL 3.3" in out
+    assert "Raise the moogs_structures minimum to 3.4.2." in out
+
+
+def test_per_piece_carving_on_1_20_passes_with_msl_3_4_2(tmp_path, monkeypatch, capsys):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "template_pool", "start.json", _pool([VERSIONED_WITH_CARVING]))
+    _msl_mod(tmp_path, ">=3.4.2")
     passed, summary = mod.run(FakeContext("test", ["1.20.4", "1.20.6", "1.21", "1.21.1"], tmp_path))
     out = capsys.readouterr().out
-    assert passed and "1 warning(s)" in summary, out
-    assert ("[WARN] moogs_structures:versioned_single_pool_element `enhanced_terrain_adaptation` "
-            "is skipped on 1.20.4-1.20.6") in out
-    assert "the structure-wide carving" in out and "template_pool/start.json" in out
+    assert passed and "warning" not in summary, out
+    assert "[WARN]" not in out and "first read by MSL" not in out
 
 
-def test_per_piece_carving_on_1_21_is_silent(tmp_path, monkeypatch, capsys):
+def test_per_piece_carving_on_1_21_needs_msl_3_0_0_only(tmp_path, monkeypatch, capsys):
     stub_registries(monkeypatch)
     _write(tmp_path, "test", "template_pool", "start.json", _pool([VERSIONED_WITH_CARVING]))
     _msl_mod(tmp_path, ">=3.3.0")
@@ -892,16 +903,16 @@ def test_per_piece_carving_on_1_21_is_silent(tmp_path, monkeypatch, capsys):
     assert passed and "warning" not in summary and "[WARN]" not in out, out
 
 
-def test_a_low_minimum_on_1_20_does_not_blame_the_release(tmp_path, monkeypatch, capsys):
-    # On 1.20 no MSL reads it, so raising the minimum would not help: no release error there.
+def test_a_low_minimum_on_both_lines_is_raised_to_the_1_20_release(tmp_path, monkeypatch, capsys):
     # (1.1.0 is the first MSL with the versioned element itself.)
     stub_registries(monkeypatch)
     _write(tmp_path, "test", "template_pool", "start.json", _pool([VERSIONED_WITH_CARVING]))
     _msl_mod(tmp_path, ">=1.1.0-0")
-    passed, _ = mod.run(FakeContext("test", ["1.20.4", "1.20.6"], tmp_path))
+    passed, _ = mod.run(FakeContext("test", ["1.20.4", "1.21.1"], tmp_path))
     out = capsys.readouterr().out
-    assert passed, out
-    assert "first read by MSL" not in out and "[WARN]" in out
+    assert not passed, out
+    assert "first read by MSL 3.0.0 (3.4.2 on its 1.20 lines)" in out
+    assert "on 1.20.4-1.21.1 this mod allows" in out and "minimum to 3.4.2." in out
 
 
 
@@ -1020,6 +1031,22 @@ def test_terrain_adaptation_none_needs_msl_4_0_0(tmp_path, monkeypatch, capsys):
     _msl_mod(root, ">=4.0.0")
     passed, _ = mod.run(FakeContext("test", ["1.20.4", "1.20.6", "1.21.1"], root))
     assert passed, capsys.readouterr().out
+
+
+def test_none_on_a_versioned_element_before_msl_3_4_2_is_skipped_on_1_20(tmp_path, monkeypatch, capsys):
+    # Before 3.4.2 MSL's 1.20 builds skip a versioned element's own adaptation whole, so
+    # its "none" is dropped on 1.20.6 rather than failing the file, as it does on 1.21.1.
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "template_pool", "p.json",
+           _pool([dict(VERSIONED_WITH_CARVING, enhanced_terrain_adaptation="none")]))
+    _msl_mod(tmp_path, ">=3.3.0")
+    passed, _ = mod.run(FakeContext("test", ["1.20.6", "1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert ('versioned_single_pool_element `enhanced_terrain_adaptation: "none"` '
+            "first accepted by MSL 4.0.0") in out, out
+    assert "template_pool/p.json fail to load on 1.21.1" in out, out
+    assert "on 1.20.6 the field is dropped without a word" in out, out
 
 
 # --- MSL 4.1.0 structures hanging from ceilings ----------------------------------------
