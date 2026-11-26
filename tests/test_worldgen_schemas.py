@@ -804,3 +804,72 @@ def test_a_structures_mc_versions_must_be_a_range_msl_reads(tmp_path, capsys, ga
     assert passed == ok, out
     if gate == "26.3-1.21.4":
         assert "s0.json @ mc_versions\n    '26.3-1.21.4' has its minimum above its maximum" in out
+
+
+# --- MSL 4.0.0: liquid, replacement, ring and spawner version fields ---------------------
+
+def _expect(tmp_path, capsys, message: str | None) -> None:
+    """The schema check passes when ``message`` is None, else fails and prints it."""
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert passed == (message is None), out
+    if message is not None:
+        assert message in out, out
+
+
+@pytest.mark.parametrize("fields, message", [
+    ({"fully_submerged": True, "max_footprint_in_liquid": 0}, None),
+    ({"fully_submerged": False, "max_footprint_in_liquid": 0.25}, None),
+    ({"max_footprint_in_liquid": 1.0}, None),
+    ({"fully_submerged": "yes"}, "'yes' is not of type 'boolean'"),
+    ({"max_footprint_in_liquid": 1.5}, "greater than the maximum of 1"),
+    ({"max_footprint_in_liquid": -0.1}, "less than the minimum of 0"),
+])
+def test_a_structures_liquid_fields(tmp_path, capsys, fields, message):
+    _write(tmp_path, "test", "structure", "s.json", _generic_structure(**fields))
+    _expect(tmp_path, capsys, message)
+
+
+_FOLLOWS = {"modid": "test", "vanilla_key": "fortress"}
+
+
+@pytest.mark.parametrize("fields, message", [
+    ({"generates": "always"}, None),
+    ({"when_replacing": _FOLLOWS}, None),
+    ({"generates": "when_replacing", "when_replacing": _FOLLOWS}, None),
+    ({"generates": "unless_replacing", "when_replacing": {**_FOLLOWS, "spacing": 40, "separation": 8}}, None),
+    ({"generates": "when_replacing"}, "needs a when_replacing block"),
+    ({"generates": "unless_replacing"}, "needs a when_replacing block"),
+    ({"generates": "never", "when_replacing": _FOLLOWS}, "'never' is not one of"),
+    ({"when_replacing": {**_FOLLOWS, "spacing": 40}}, "'separation' is a dependency of 'spacing'"),
+    ({"when_replacing": {**_FOLLOWS, "separation": 8}}, "'spacing' is a dependency of 'separation'"),
+])
+def test_a_sets_generates_and_its_replacement(tmp_path, capsys, fields, message):
+    # MSL takes the replacing pair both or neither, and a generates that follows a replacement needs one named.
+    _write(tmp_path, "test", "structure_set", "s.json", _spread(**fields))
+    _expect(tmp_path, capsys, message)
+
+
+@pytest.mark.parametrize("distance, message", [
+    (0, None),
+    (1023, None),
+    (1024, "greater than the maximum of 1023"),
+    (-1, "less than the minimum of 0"),
+    (32.5, "is not of type 'integer'"),
+])
+def test_conditional_rings_enabled_distance(tmp_path, capsys, distance, message):
+    _write(tmp_path, "test", "structure_set", "s.json", _rings(enabled_distance=distance))
+    _expect(tmp_path, capsys, message)
+
+
+@pytest.mark.parametrize("processor", [
+    {"processor_type": "moogs_structures:spawner_randomizing_processor",
+     "weighted_entities": [{"entity": "minecraft:zombie", "weight": 1}]},
+    {"processor_type": "moogs_structures:trial_spawner_randomizing_processor", "normal_config": "test:normal"},
+], ids=["spawner", "trial_spawner"])
+@pytest.mark.parametrize("version, ok", [("1.20", True), ("1.21.11", True), ("26.3", True),
+                                         ("1.19.4", False), ("1.21.12", False), (1.21, False)])
+def test_a_spawners_nbt_version_must_be_one_msl_knows(tmp_path, capsys, monkeypatch, processor, version, ok):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([{**processor, "nbt_version": version}]))
+    _expect(tmp_path, capsys, None if ok else "p.json @ nbt_version")

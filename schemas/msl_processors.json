@@ -84,7 +84,8 @@
       "required_player_range": { "type": "integer", "minimum": 0 },
       "spawn_count":           { "type": "integer", "minimum": 0 },
       "spawn_range":           { "type": "integer", "minimum": 0 },
-      "spawner_replacement_block": { "$ref": "msl_blockstate.json" }
+      "spawner_replacement_block": { "$ref": "msl_blockstate.json" },
+      "nbt_version":           { "$ref": "msl_nbt_version.json" }
     }
   },
 
@@ -101,7 +102,8 @@
       "ominous_config": {
         "type": "string",
         "pattern": "^([a-z0-9_.-]+:)?[a-z0-9_./-]+$"
-      }
+      },
+      "nbt_version": { "$ref": "msl_nbt_version.json" }
     }
   },
 

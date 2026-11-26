@@ -73,6 +73,12 @@
       "minimum": 0,
       "maximum": 4095
     },
+    "enabled_distance": {
+      "type": "integer",
+      "description": "Optional (MSL 4.0.0+). Ring spacing in chunks used instead of distance while the preset is enabled, so the rings sit where vanilla's would when they stand in for them. Must be in [0, 1023]. StrictOptionalField: a value out of range fails the set.",
+      "minimum": 0,
+      "maximum": 1023
+    },
     "structure_id": {
       "type": "string",
       "description": "Optional. If present, must resolve to a real structure in the pack.",
