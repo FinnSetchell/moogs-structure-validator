@@ -86,7 +86,7 @@
     "burying_type": {
       "type": "string",
       "enum": ["LOWEST_CORNER"],
-      "description": "MSL 4.0.0+. LOWEST_CORNER runs the land search under each corner of the start piece and places the structure on the lowest. The Nether type refuses the overworld type's other burying types, and refuses LOWEST_CORNER with FIXED_HEIGHT (no land search to bury into). Older MSL ignores the field."
+      "description": "MSL 4.0.0+. LOWEST_CORNER runs the land search under each corner of the start piece and places the structure on the lowest. The Nether type refuses the overworld type's other burying types, and refuses LOWEST_CORNER with FIXED_HEIGHT or CEILING (no land search to bury into). Older MSL ignores the field."
     },
     "use_bounding_box_hack": {
       "type": "boolean",
@@ -100,8 +100,8 @@
     "enhanced_terrain_adaptation": { "$ref": "msl_enhanced_terrain_adaptation.json" }
   },
   "not": {
-    "description": "burying_type needs a land search: MSL refuses it on a FIXED_HEIGHT structure.",
+    "description": "burying_type needs a land search: MSL refuses it on a FIXED_HEIGHT or CEILING structure.",
     "required": ["burying_type", "land_search_direction"],
-    "properties": { "land_search_direction": { "enum": ["FIXED_HEIGHT"] } }
+    "properties": { "land_search_direction": { "enum": ["FIXED_HEIGHT", "CEILING"] } }
   }
 }
