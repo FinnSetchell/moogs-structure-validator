@@ -17,7 +17,8 @@ Sources (all pinned per MC version, so cache entries never go stale):
 * ``https://raw.githubusercontent.com/misode/mcmeta/<version>-summary/data/tag/worldgen/biome/data.json``
   -- vanilla biome tags.
 * ``https://raw.githubusercontent.com/misode/mcmeta/summary/versions/data.json``
-  -- the version index (rolling; refreshed with ``--refresh``).
+  -- the version index (rolling; refreshed with ``--refresh``, and when it lacks
+  a targeted version).
 * GitHub contents API for loader biome tags (see ``data/biome_tag_map.json``).
 """
 from __future__ import annotations
@@ -208,8 +209,13 @@ class Mcmeta:
     # version index
     @property
     def versions(self) -> VersionIndex:
+        """The version index. A cached copy that lacks a targeted version predates
+        that release, so it is fetched once more; if that fails, the copy stands."""
         if self._index is None:
-            self._index = VersionIndex(fetch_version_entries(self.cache_dir, self.refresh))
+            index = VersionIndex(fetch_version_entries(self.cache_dir, self.refresh))
+            if index and not self.refresh and any(index.get(v) is None for v in self.mc_versions):
+                index = VersionIndex(fetch_version_entries(self.cache_dir, True)) or index
+            self._index = index
         return self._index
 
     def version_added(self, registry_key: str, id_: str, after: str) -> str | None:

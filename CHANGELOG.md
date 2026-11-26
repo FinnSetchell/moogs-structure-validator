@@ -12,6 +12,7 @@
 
 ### Changed
 - **`check_msl_replace_vanilla` takes another mod's structure as the one to replace.** MSL replaces any structure id, and Fortress Reimagined replaces Nether Structures' mega fortress when both are installed, but the check failed every id outside the vanilla registry. Another mod's structure now passes when a loader file names that mod as a dependency of any kind (Fabric `depends`, `recommends` or `suggests`, Quilt `depends`, a Forge or NeoForge dependency, mandatory or not), and warns when none does, since a misspelt id would never apply. One in the mod's own namespace must exist. Vanilla ids are checked as before.
+- **A release newer than the cached version list is looked up.** The version index is cached, so a copy from before a release could not name it: a run targeting 26.3 warned `version '26.3' not found in versions.json`, and rules that read the targeted DataVersions went quiet. The index is now fetched once more when it lacks a targeted version; if that fails, the cached copy is used.
 
 ## v1.12.0 -- 2026-09-24
 
