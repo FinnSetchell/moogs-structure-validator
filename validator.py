@@ -44,6 +44,7 @@ CHECK_NAMES = [
     "check_msl_structure_tags",
     "check_msl_replace_vanilla",
     "check_msl_placements_and_processors",
+    "check_msl_adaptation_areas",
     "check_item_format",
     "check_book_contents",
     "check_potion_effects",

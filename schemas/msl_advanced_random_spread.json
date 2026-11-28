@@ -30,11 +30,20 @@
       "enum": ["linear", "triangular"],
       "description": "Distribution used when scattering structures within a region. Defaults to 'linear'."
     },
+    "generates": {
+      "type": "string",
+      "enum": ["always", "when_replacing", "unless_replacing"],
+      "description": "MSL 4.0.0+. When the set generates, by the state of the preset holding the replacement its when_replacing names: always (the default), only while that preset is on, or only while it is off. StrictOptionalField: any other string fails the set."
+    },
 
     "when_replacing": {
       "type": "object",
-      "description": "Optional (MSL 3.3.0+). Spacing and separation used instead of the base pair while the (modid, vanilla_key) preset is enabled, so a replacement can inherit the density of the vanilla structure it stands in for.",
-      "required": ["modid", "vanilla_key", "spacing", "separation"],
+      "description": "Optional (MSL 3.3.0+). Names the replacement the set follows, and the spacing and separation used instead of the base pair while the (modid, vanilla_key) preset is enabled, so a replacement can inherit the density of the vanilla structure it stands in for. From MSL 4.0.0 the pair can be left out (both or neither) when the block only names the replacement for generates.",
+      "required": ["modid", "vanilla_key"],
+      "dependencies": {
+        "spacing": ["separation"],
+        "separation": ["spacing"]
+      },
       "additionalProperties": false,
       "properties": {
         "modid": {
@@ -133,5 +142,11 @@
       "description": "Optional (MSL 3.1.0+). Runtime-derivable from the owning set; only set it to override the derived value. Must point at a real structure in the pack.",
       "pattern": "^([a-z0-9_.-]+:)?[a-z0-9_./-]+$"
     }
+  },
+  "not": {
+    "description": "generates \"when_replacing\" and \"unless_replacing\" read the state of a replacement, so the placement needs a when_replacing block naming it: MSL refuses the set without one.",
+    "required": ["generates"],
+    "properties": { "generates": { "enum": ["when_replacing", "unless_replacing"] } },
+    "not": { "required": ["when_replacing"] }
   }
 }

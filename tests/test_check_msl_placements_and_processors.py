@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from checks import check_msl_placements_and_processors as mod
 from tests.nbt_helpers import (
     FakeContext,
@@ -264,6 +266,17 @@ def test_when_replacing_other_modid_warns_not_errors(tmp_path, capsys):
     out = capsys.readouterr().out
     assert passed
     assert "WARN" in out and "othermod" in out
+
+
+@pytest.mark.parametrize("vanilla_key, ok", [("desert_pyramid", True), ("jungle_pyramid", False)])
+def test_when_replacing_without_a_spacing_pair_still_names_a_preset(tmp_path, capsys, vanilla_key, ok):
+    # MSL 4.0.0: a set that only follows the replacement (generates) leaves the pair out.
+    block = {"modid": "test", "vanilla_key": vanilla_key}
+    _pyramid_set(tmp_path, _spread(generates="when_replacing", when_replacing=block))
+    passed, _ = mod.run(_ctx(tmp_path))
+    out = capsys.readouterr().out
+    assert passed == ok, out
+    assert ("no matching preset" in out) is not ok, out
 
 
 # ---------- base spacing / separation ----------

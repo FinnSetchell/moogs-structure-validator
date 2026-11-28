@@ -20,6 +20,11 @@
       "description": "Namespaced resource location of the starting template pool.",
       "pattern": "^[a-z0-9_.-]+:[a-z0-9_./-]+$"
     },
+    "mc_versions": {
+      "type": "string",
+      "description": "MSL 4.0.0+. The Minecraft versions the structure generates on, one version or a range (\"1.21.4-26.3\"); on any other it has no biomes and is never placed. StrictOptionalField: a range MSL cannot read, or one whose minimum is above its maximum, fails the structure.",
+      "pattern": "^\\s*\\d+(\\.\\d+)*\\s*(-\\s*\\d+(\\.\\d+)*\\s*)?$"
+    },
     "size": {
       "type": "integer",
       "description": "Jigsaw expansion depth. MSL raises the vanilla cap: must be between 0 and 128.",
@@ -58,6 +63,16 @@
     "cannot_spawn_in_liquid": {
       "type": "boolean",
       "description": "If true, prevents the structure from spawning when the surface block at the chunk centre is a liquid. Defaults to false."
+    },
+    "fully_submerged": {
+      "type": "boolean",
+      "description": "MSL 4.0.0+. Keeps a sea structure fully underwater, so no part of it sticks out of the surface. Defaults to false. StrictOptionalField: a non-boolean fails the structure. The Nether type does not read it."
+    },
+    "max_footprint_in_liquid": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "MSL 4.0.0+. The largest share (0.0 to 1.0) of the start piece's footprint that may stand over liquid; a structure over more of it is not placed. StrictOptionalField: a value outside the range fails the structure. The Nether type does not read it."
     },
     "terrain_height_radius_check": {
       "type": "integer",
@@ -104,6 +119,7 @@
       "type": "string",
       "enum": ["apply_waterlogging", "ignore_waterlogging"],
       "description": "Controls waterlogging behaviour during structure placement."
-    }
+    },
+    "enhanced_terrain_adaptation": { "$ref": "msl_enhanced_terrain_adaptation.json" }
   }
 }

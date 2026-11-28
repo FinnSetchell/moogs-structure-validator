@@ -39,6 +39,42 @@
       "enum": ["apply_waterlogging", "ignore_waterlogging"],
       "description": "Controls whether liquid waterlogging is applied when placing the structure."
     },
-    "enhanced_terrain_adaptation": { "$ref": "msl_enhanced_terrain_adaptation.json" }
+    "enhanced_terrain_adaptation": { "$ref": "msl_enhanced_terrain_adaptation.json" },
+    "adaptation_area": {
+      "type": "object",
+      "description": "MSL 4.0.0+. The columns of a rigid piece the enhanced terrain adaptation works around, instead of the piece's whole box. Exactly one of columns or footprint, and the element's projection must be rigid (both checked by hand in check_worldgen_schemas, as is min <= max in a column range).",
+      "properties": {
+        "columns": {
+          "type": "array",
+          "description": "Rectangles of template columns, both ends included, in the coordinates of the structure block that saved the piece.",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["x", "z"],
+            "properties": {
+              "x": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
+              "z": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 }
+            }
+          }
+        },
+        "footprint": {
+          "type": "object",
+          "description": "The columns holding a matching block in the template's lowest layers, as one rectangle.",
+          "properties": {
+            "layers": { "type": "integer", "minimum": 1, "maximum": 64, "description": "Default 1." },
+            "blocks": {
+              "type": "string",
+              "description": "A block tag, written with its #. Without it any block counts.",
+              "pattern": "^#([a-z0-9_.-]+:)?[a-z0-9_./-]+$"
+            },
+            "margin": { "type": "integer", "minimum": 0, "maximum": 16, "description": "Default 0." }
+          }
+        },
+        "outside_follows_ground": {
+          "type": "boolean",
+          "description": "Columns outside the area follow the ground, as the follow floor processor does. Default false."
+        }
+      }
+    }
   }
 }

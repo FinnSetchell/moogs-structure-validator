@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.nbt_helpers import FakeContext, stub_registries
 
 from checks import check_worldgen_schemas as mod
@@ -264,6 +266,62 @@ def test_unknown_msl_processor_type_fails(tmp_path):
     _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
     passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
     assert not passed
+
+
+# MSL 4.0.0: follow_floor_processor (search_range Codec.intRange(1, 64), default 16;
+# offset an int, default 0) and rail_slope_processor (no fields).
+def test_follow_floor_and_rail_slope_processors_pass(tmp_path):
+    procs = [{"processor_type": "moogs_structures:follow_floor_processor"},
+             {"processor_type": "moogs_structures:follow_floor_processor", "search_range": 64, "offset": -2},
+             {"processor_type": "moogs_structures:follow_floor_processor", "search_range": 1},
+             {"processor_type": "moogs_structures:rail_slope_processor"}]
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list(procs))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert passed
+
+
+def test_rail_rotation_processor_passes(tmp_path):
+    # MSL 4.0.0, MapCodec.unit: MSL adds it to its own structures, and a pool may list it.
+    proc = {"processor_type": "moogs_structures:rail_rotation_processor"}
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.20.1", "1.21.1"], tmp_path))
+    assert passed
+
+
+def test_follow_floor_search_range_out_of_range_fails(tmp_path, capsys):
+    # StrictOptionalField: MSL refuses a value outside 1-64.
+    for bad, why in ((0, "less than the minimum of 1"), (65, "greater than the maximum of 64")):
+        root = tmp_path / str(bad)
+        proc = {"processor_type": "moogs_structures:follow_floor_processor", "search_range": bad}
+        _write(root, "test", "processor_list", "p.json", _processor_list([proc]))
+        passed, _ = mod.run(FakeContext("test", ["1.21"], root))
+        out = capsys.readouterr().out
+        assert not passed, out
+        assert "p.json @ search_range" in out and why in out, out
+
+
+def test_follow_floor_offset_must_be_a_whole_number(tmp_path):
+    proc = {"processor_type": "moogs_structures:follow_floor_processor", "offset": 1.5}
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
+    assert not passed
+
+
+ANCHOR = {"processor_type": "moogs_structures:hanging_entity_anchor_processor"}
+
+
+def test_hanging_entity_anchor_processor_passes(tmp_path):
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([ANCHOR]))
+    passed, _ = mod.run(FakeContext("test", ["1.20.1", "1.21.1"], tmp_path))
+    assert passed
+
+
+def test_hanging_entity_anchor_misspelled_fails(tmp_path, capsys):
+    proc = {"processor_type": "moogs_structures:hanging_entity_anchor"}
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([proc]))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    assert not passed
+    assert "unknown MSL processor type 'moogs_structures:hanging_entity_anchor'" in capsys.readouterr().out
 
 
 def test_pillar_processor_valid_passes(tmp_path):
@@ -630,3 +688,188 @@ def test_advanced_random_spread_valid_passes(tmp_path):
     _write(tmp_path, "test", "structure_set", "s.json", data)
     passed, _ = mod.run(FakeContext("test", ["1.21"], tmp_path))
     assert passed
+
+
+# --- MSL 4.0.0 adaptation areas and "none" ---------------------------------------------
+
+def _area_element(**overrides) -> dict:
+    element = {"element_type": "moogs_structures:versioned_single_pool_element", "location": "test:start",
+               "projection": "rigid", "processors": "minecraft:empty",
+               "adaptation_area": {"columns": [{"x": [2, 5], "z": [0, 3]}], "outside_follows_ground": True}}
+    element.update(overrides)
+    return element
+
+
+def test_adaptation_areas_and_none_pass(tmp_path, capsys):
+    # Both ways of naming the columns, and "none" in every place MSL takes an adaptation.
+    _write(tmp_path, "test", "template_pool", "p.json", _pool([
+        _area_element(),
+        _area_element(adaptation_area={"footprint": {"layers": 2, "blocks": "#minecraft:logs", "margin": 1}},
+                      enhanced_terrain_adaptation="none"),
+        {"element_type": "moogs_structures:mirroring_single_pool_element", "location": "test:a",
+         "projection": "rigid", "mirror": "FRONT_BACK", "enhanced_terrain_adaptation": "none"},
+        {"element_type": "moogs_structures:legacy_ocean_bottom_single_pool_element", "location": "test:b",
+         "projection": "rigid", "enhanced_terrain_adaptation": "none"}]))
+    _write(tmp_path, "test", "structure", "s.json", _generic_structure(enhanced_terrain_adaptation="none"))
+    _write(tmp_path, "test", "structure", "n.json", _generic_structure(
+        type="moogs_structures:moogs_structures_generic_nether_jigsaw_structure",
+        land_search_direction="HIGHEST_LAND", enhanced_terrain_adaptation="none"))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    assert passed, capsys.readouterr().out
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"adaptation_area": {"columns": [{"x": [0, 1], "z": [0, 1]}], "footprint": {}}},
+     'needs exactly one of "columns" or "footprint"'),
+    ({"adaptation_area": {"outside_follows_ground": True}}, 'needs exactly one of "columns" or "footprint"'),
+    ({"adaptation_area": {"columns": [{"x": [5, 2], "z": [0, 3]}]}}, "and 5 is more than 2"),
+    ({"projection": "terrain_matching"}, 'needs "projection": "rigid"'),
+    ({"adaptation_area": {"columns": []}}, "should be non-empty"),
+    ({"adaptation_area": {"columns": [{"x": [1], "z": [0, 3]}]}}, "is too short"),
+    ({"adaptation_area": {"footprint": {"layers": 65}}}, "greater than the maximum of 64"),
+    ({"adaptation_area": {"footprint": {"margin": 17}}}, "greater than the maximum of 16"),
+    ({"adaptation_area": {"footprint": {"blocks": "minecraft:logs"}}}, "does not match"),
+    ({"enhanced_terrain_adaptation": "off"}, "'off' does not match '^none$'"),
+])
+def test_adaptation_area_shapes_msl_refuses_fail(tmp_path, capsys, change, message):
+    _write(tmp_path, "test", "template_pool", "p.json", _pool([_area_element(**change)]))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed, out
+    assert message in out, out
+
+
+def test_terrain_adaptation_strings_other_than_none_fail_on_structures(tmp_path, capsys):
+    # The generic jigsaw's adaptation was not checked at all before; now it takes the same values.
+    _write(tmp_path, "test", "structure", "s.json", _generic_structure(enhanced_terrain_adaptation="carve"))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed and "'carve' does not match '^none$'" in out, out
+
+
+# --- MSL 4.1.0 structures hanging from ceilings ----------------------------------------
+
+def _hanging_structure(**overrides) -> dict:
+    return _generic_structure(**{"type": "moogs_structures:moogs_structures_generic_nether_jigsaw_structure",
+                                 "land_search_direction": "CEILING", "ledge_offset_y": 2, **overrides})
+
+
+CEILING_PROC = {"processor_type": "moogs_structures:follow_ceiling_processor"}
+
+
+def test_hanging_structures_and_the_follow_ceiling_processor_pass(tmp_path, capsys):
+    # Registered on every Minecraft line, with follow_floor_processor's fields.
+    _write(tmp_path, "test", "structure", "s.json", _hanging_structure(cannot_spawn_in_liquid=True))
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([
+        CEILING_PROC, {**CEILING_PROC, "search_range": 64, "offset": 3}, {**CEILING_PROC, "search_range": 1}]))
+    passed, _ = mod.run(FakeContext("test", ["1.20.1", "1.21.1"], tmp_path))
+    assert passed, capsys.readouterr().out
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"search_range": 0}, "less than the minimum of 1"),
+    ({"search_range": 65}, "greater than the maximum of 64"),
+    ({"offset": 1.5}, "is not of type 'integer'"),
+])
+def test_follow_ceiling_fields_msl_refuses_fail(tmp_path, capsys, change, message):
+    # StrictOptionalField: a value out of range fails the list instead of reading as the default.
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([{**CEILING_PROC, **change}]))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed and message in out, out
+
+
+def test_a_land_search_direction_msl_cannot_read_fails(tmp_path, capsys):
+    # StringRepresentable.fromEnum reads the upper-case names only.
+    _write(tmp_path, "test", "structure", "s.json", _hanging_structure(land_search_direction="ceiling"))
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert not passed and "s.json @ land_search_direction" in out, out
+
+
+# --- MSL 4.0.0: a structure that generates only on some Minecraft versions -----------------
+
+NETHER = {"type": "moogs_structures:moogs_structures_generic_nether_jigsaw_structure",
+          "land_search_direction": "HIGHEST_LAND"}
+
+
+@pytest.mark.parametrize("gate, ok", [("1.21.4-26.3", True), ("1.21.4", True), (" 1.21.4 - 26.3 ", True),
+                                      ("26.3-1.21.4", False), ("1.21.x", False), ("1.21.4-", False)])
+def test_a_structures_mc_versions_must_be_a_range_msl_reads(tmp_path, capsys, gate, ok):
+    for i, base in enumerate(({}, NETHER)):
+        _write(tmp_path, "test", "structure", f"s{i}.json",
+               _generic_structure(**base, mc_versions=gate, y_allowance={"min_y_allowed": 20}))
+    passed, _ = mod.run(FakeContext("test", ["1.21.4", "26.3"], tmp_path))
+    out = capsys.readouterr().out
+    assert passed == ok, out
+    if gate == "26.3-1.21.4":
+        assert "s0.json @ mc_versions\n    '26.3-1.21.4' has its minimum above its maximum" in out
+
+
+# --- MSL 4.0.0: liquid, replacement, ring and spawner version fields ---------------------
+
+def _expect(tmp_path, capsys, message: str | None) -> None:
+    """The schema check passes when ``message`` is None, else fails and prints it."""
+    passed, _ = mod.run(FakeContext("test", ["1.21.1"], tmp_path))
+    out = capsys.readouterr().out
+    assert passed == (message is None), out
+    if message is not None:
+        assert message in out, out
+
+
+@pytest.mark.parametrize("fields, message", [
+    ({"fully_submerged": True, "max_footprint_in_liquid": 0}, None),
+    ({"fully_submerged": False, "max_footprint_in_liquid": 0.25}, None),
+    ({"max_footprint_in_liquid": 1.0}, None),
+    ({"fully_submerged": "yes"}, "'yes' is not of type 'boolean'"),
+    ({"max_footprint_in_liquid": 1.5}, "greater than the maximum of 1"),
+    ({"max_footprint_in_liquid": -0.1}, "less than the minimum of 0"),
+])
+def test_a_structures_liquid_fields(tmp_path, capsys, fields, message):
+    _write(tmp_path, "test", "structure", "s.json", _generic_structure(**fields))
+    _expect(tmp_path, capsys, message)
+
+
+_FOLLOWS = {"modid": "test", "vanilla_key": "fortress"}
+
+
+@pytest.mark.parametrize("fields, message", [
+    ({"generates": "always"}, None),
+    ({"when_replacing": _FOLLOWS}, None),
+    ({"generates": "when_replacing", "when_replacing": _FOLLOWS}, None),
+    ({"generates": "unless_replacing", "when_replacing": {**_FOLLOWS, "spacing": 40, "separation": 8}}, None),
+    ({"generates": "when_replacing"}, "needs a when_replacing block"),
+    ({"generates": "unless_replacing"}, "needs a when_replacing block"),
+    ({"generates": "never", "when_replacing": _FOLLOWS}, "'never' is not one of"),
+    ({"when_replacing": {**_FOLLOWS, "spacing": 40}}, "'separation' is a dependency of 'spacing'"),
+    ({"when_replacing": {**_FOLLOWS, "separation": 8}}, "'spacing' is a dependency of 'separation'"),
+])
+def test_a_sets_generates_and_its_replacement(tmp_path, capsys, fields, message):
+    # MSL takes the replacing pair both or neither, and a generates that follows a replacement needs one named.
+    _write(tmp_path, "test", "structure_set", "s.json", _spread(**fields))
+    _expect(tmp_path, capsys, message)
+
+
+@pytest.mark.parametrize("distance, message", [
+    (0, None),
+    (1023, None),
+    (1024, "greater than the maximum of 1023"),
+    (-1, "less than the minimum of 0"),
+    (32.5, "is not of type 'integer'"),
+])
+def test_conditional_rings_enabled_distance(tmp_path, capsys, distance, message):
+    _write(tmp_path, "test", "structure_set", "s.json", _rings(enabled_distance=distance))
+    _expect(tmp_path, capsys, message)
+
+
+@pytest.mark.parametrize("processor", [
+    {"processor_type": "moogs_structures:spawner_randomizing_processor",
+     "weighted_entities": [{"entity": "minecraft:zombie", "weight": 1}]},
+    {"processor_type": "moogs_structures:trial_spawner_randomizing_processor", "normal_config": "test:normal"},
+], ids=["spawner", "trial_spawner"])
+@pytest.mark.parametrize("version, ok", [("1.20", True), ("1.21.11", True), ("26.3", True),
+                                         ("1.19.4", False), ("1.21.12", False), (1.21, False)])
+def test_a_spawners_nbt_version_must_be_one_msl_knows(tmp_path, capsys, monkeypatch, processor, version, ok):
+    stub_registries(monkeypatch)
+    _write(tmp_path, "test", "processor_list", "p.json", _processor_list([{**processor, "nbt_version": version}]))
+    _expect(tmp_path, capsys, None if ok else "p.json @ nbt_version")

@@ -9,7 +9,9 @@ content and stays silent (``_MSL_TYPE_WINDOWS``).
 Two ``y_allowance`` shapes a JSON schema cannot express are checked by hand:
 ``max_y_allowed`` below ``min_y_allowed`` (MSL rejects it at datapack load), and
 a ``max`` with no ``min`` on the generic jigsaw type (MSL unwraps the absent
-``min`` and crashes chunk generation).
+``min`` and crashes chunk generation). So are the rules MSL's codec applies to a
+versioned element's ``adaptation_area`` once it has read it: exactly one of
+``columns`` or ``footprint``, ``[min, max]`` ranges, and a rigid projection.
 """
 from __future__ import annotations
 
@@ -20,8 +22,8 @@ from typing import TYPE_CHECKING
 import jsonschema
 
 import schemas.patcher
-from core.context import services
-from core.mcversions import DV_1_21, DV_VERSION_NAMES, BoundarySide, side_of
+from core.context import MSL_JIGSAW_STRUCTURES, services
+from core.mcversions import DV_1_21, DV_VERSION_NAMES, BoundarySide, parse_range, side_of
 
 if TYPE_CHECKING:
     from core.context import ValidatorContext
@@ -51,6 +53,7 @@ _MSL_ELEMENT_SCHEMAS: dict[str, str] = {
     "moogs_structures:mirroring_single_pool_element": "msl_mirroring_pool_element.json",
     "moogs_structures:legacy_ocean_bottom_single_pool_element": "msl_legacy_ocean_bottom_pool_element.json",
 }
+_VERSIONED_ELEMENT = "moogs_structures:versioned_single_pool_element"
 _MSL_PLACEMENT_SCHEMAS: dict[str, str] = {
     "moogs_structures:advanced_random_spread": "msl_advanced_random_spread.json",
     "moogs_structures:conditional_concentric_rings": "msl_conditional_concentric_rings.json",
@@ -171,6 +174,19 @@ def _iter_pool_elements(data: dict):
         yield from walk(elements, "")
 
 
+def _check_mc_versions(rel, data: dict) -> int:
+    """A structure's ``mc_versions`` range with its minimum above its maximum: MSL's
+    ``VersionResolver.parseRange`` refuses it, so the structure fails to load."""
+    gate = data.get("mc_versions") if data.get("type") in MSL_JIGSAW_STRUCTURES else None
+    parsed = parse_range("".join(gate.split())) if isinstance(gate, str) and gate.strip() else None
+    if parsed is None or parsed[0] <= parsed[1]:
+        return 0
+    print(f"  [structure] {rel} @ mc_versions")
+    print(f"    {gate!r} has its minimum above its maximum: MSL refuses the range, so the structure "
+          f"fails to load")
+    return 1
+
+
 def _check_y_allowance(rel, stype: str, data: dict) -> int:
     allowance = data.get("y_allowance")
     if not isinstance(allowance, dict):
@@ -189,6 +205,37 @@ def _check_y_allowance(rel, stype: str, data: dict) -> int:
               f" preserves current behaviour)")
         return 1
     return 0
+
+
+def _check_adaptation_area(rel, where: str, element: dict) -> int:
+    """MSL 4.0.0's checks on a versioned element's ``adaptation_area`` after its codec
+    has read the fields (``AdaptationArea.check``, ``ColumnRect.RANGE``,
+    ``VersionAwareSinglePoolElement.checkArea``). The rigid projection is checked on the
+    whole element, so a terrain-matching one fails the pool on every version; the other
+    two fail it from 1.20.5, while on 1.20-1.20.4 (DataFixerUpper 6) MSL drops the area
+    without a word."""
+    area = element.get("adaptation_area")
+    if not isinstance(area, dict):
+        return 0
+    at = f"{where} > adaptation_area"
+    problems: list[tuple[str, str]] = []
+    if ("columns" in area) == ("footprint" in area):
+        problems.append((at, 'needs exactly one of "columns" or "footprint"'))
+    columns = area.get("columns")
+    for i, rect in enumerate(columns if isinstance(columns, list) else []):
+        for axis in ("x", "z"):
+            pair = rect.get(axis) if isinstance(rect, dict) else None
+            if (isinstance(pair, list) and len(pair) == 2 and all(isinstance(n, int) for n in pair)
+                    and pair[0] > pair[1]):
+                problems.append((f"{at} > columns > {i} > {axis}",
+                                 f"a column range is [min, max], and {pair[0]} is more than {pair[1]}"))
+    if element.get("projection") != "rigid":
+        problems.append((at, 'needs "projection": "rigid"; MSL refuses the pool otherwise, as only a rigid '
+                             'piece is shaped around'))
+    for path, message in problems:
+        print(f"  [template_pool] {rel} @ {path}")
+        print(f"    {message}")
+    return len(problems)
 
 
 def _check_msl_types(subdir: str, rel, data: dict, dv_range) -> int:
@@ -217,6 +264,8 @@ def _check_msl_types(subdir: str, rel, data: dict, dv_range) -> int:
                     errors += 1
                 else:
                     errors += _validate_against(schema_file, element, subdir, rel, where)
+                    if etype == _VERSIONED_ELEMENT:
+                        errors += _check_adaptation_area(rel, where, element)
 
     elif subdir == "processor_list":
         processors = data.get("processors")
@@ -294,6 +343,8 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
 
             n = _print_errors(validator, data, subdir, rel, "(root)")
             n += _check_msl_types(subdir, rel, data, dv_range)
+            if subdir == "structure" and isinstance(data, dict):
+                n += _check_mc_versions(rel, data)
             if n:
                 error_count += n
                 failed = True

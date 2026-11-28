@@ -84,7 +84,8 @@
       "required_player_range": { "type": "integer", "minimum": 0 },
       "spawn_count":           { "type": "integer", "minimum": 0 },
       "spawn_range":           { "type": "integer", "minimum": 0 },
-      "spawner_replacement_block": { "$ref": "msl_blockstate.json" }
+      "spawner_replacement_block": { "$ref": "msl_blockstate.json" },
+      "nbt_version":           { "$ref": "msl_nbt_version.json" }
     }
   },
 
@@ -101,7 +102,8 @@
       "ominous_config": {
         "type": "string",
         "pattern": "^([a-z0-9_.-]+:)?[a-z0-9_./-]+$"
-      }
+      },
+      "nbt_version": { "$ref": "msl_nbt_version.json" }
     }
   },
 
@@ -293,6 +295,67 @@
         }
       },
       "probability": { "type": "number", "minimum": 0, "maximum": 1 }
+    }
+  },
+
+  "moogs_structures:follow_floor_processor": {
+    "type": "object",
+    "description": "MSL 4.0.0+. Moves each column of a piece onto the floor found near its placement height, so it follows the ground under the Nether roof, in caves and under overhangs. Both fields use StrictOptionalField: a value out of range fails the list.",
+    "required": ["processor_type"],
+    "properties": {
+      "processor_type": { "type": "string" },
+      "search_range": {
+        "type": "integer", "minimum": 1, "maximum": 64,
+        "description": "How far each column looks up or down for its floor (Codec.intRange(1, 64)). Default 16."
+      },
+      "offset": {
+        "type": "integer",
+        "description": "Blocks added to the height of the floor found. Default 0."
+      }
+    }
+  },
+
+  "moogs_structures:follow_ceiling_processor": {
+    "type": "object",
+    "description": "MSL 4.1.0+. follow_floor_processor upside down: moves each column of a piece up or down so its top row sits just under the rock above it. Same codec shape as follow_floor_processor, registered on every Minecraft line. Both fields use StrictOptionalField: a value out of range fails the list.",
+    "required": ["processor_type"],
+    "properties": {
+      "processor_type": { "type": "string" },
+      "search_range": {
+        "type": "integer", "minimum": 1, "maximum": 64,
+        "description": "How far each column looks up or down for the rock above it (Codec.intRange(1, 64)). Default 16."
+      },
+      "offset": {
+        "type": "integer",
+        "description": "Blocks the piece's top moves further up, into the rock. Default 0."
+      }
+    }
+  },
+
+  "moogs_structures:rail_slope_processor": {
+    "type": "object",
+    "description": "MSL 4.0.0+. Lets rails on terrain-matched pieces slope with the ground. MapCodec.unit: no fields.",
+    "required": ["processor_type"],
+    "properties": {
+      "processor_type": { "type": "string" }
+    }
+  },
+
+  "moogs_structures:rail_rotation_processor": {
+    "type": "object",
+    "description": "MSL 4.0.0+. Stops flat rails lying across a rotated piece. MSL adds it to its own structures; a pool can also list it by hand. MapCodec.unit: no fields.",
+    "required": ["processor_type"],
+    "properties": {
+      "processor_type": { "type": "string" }
+    }
+  },
+
+  "moogs_structures:hanging_entity_anchor_processor": {
+    "type": "object",
+    "description": "MSL 3.1.2+. Writes the block an item frame, painting or leash knot hangs on (TileX/TileY/TileZ) at its placed position. MSL's own pool elements add it themselves; other pieces can list it. MapCodec.unit: no fields.",
+    "required": ["processor_type"],
+    "properties": {
+      "processor_type": { "type": "string" }
     }
   }
 }

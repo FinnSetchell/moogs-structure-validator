@@ -12,6 +12,13 @@ The set of vanilla structures a preset may replace comes from mcmeta's
 ``worldgen/structure`` registry across the targeted versions, so a structure
 added in a later Minecraft release is recognised as soon as the project
 targets it. The bundled list is the fallback when the registry cannot be read.
+
+MSL takes any structure id as the one to replace, another mod's included (Fortress
+Reimagined replaces Nether Structures' mega fortress); the replacement then applies
+only when that mod is installed. The validator cannot see another mod's structures,
+so such a target is checked against the mod's loader files instead: one whose
+namespace no loader file names as a dependency of any kind warns, since a misspelt
+id would never apply and nothing would say so.
 """
 from __future__ import annotations
 
@@ -75,6 +82,8 @@ _TAG_HOOKUPS: dict[str, str] = {
     "minecraft:monument":   "on_ocean_explorer_maps",
 }
 
+_FABRIC_DEPENDENCY_KEYS = ("depends", "recommends", "suggests")
+
 _ID_RE = re.compile(r"^[a-z0-9_.-]+:[a-z0-9_./-]+$")
 _PLACEHOLDER_RE = re.compile(r"\{([^{}]+)\}")
 
@@ -124,6 +133,41 @@ def _structure_set_exists(project: Project, id_: str) -> bool:
     return (project.data_root / ns / "worldgen" / "structure_set" / f"{path}.json").exists()
 
 
+def _declared_mods(project: Project) -> set[str] | None:
+    """The mod ids the loader files name as dependencies of any kind (Fabric
+    ``depends``, ``recommends`` or ``suggests``, a Quilt ``depends`` entry, a Forge
+    or NeoForge ``[[dependencies.*]]`` block, mandatory or optional). None when the
+    mod has no loader files, as a plain datapack has nowhere to name one."""
+    res = project.data_root.parent
+    mods: set[str] = set()
+    found = False
+    meta = project.try_json(res / "fabric.mod.json")
+    if isinstance(meta, dict):
+        found = True
+        for key in _FABRIC_DEPENDENCY_KEYS:
+            if isinstance(meta.get(key), dict):
+                mods |= set(meta[key])
+    meta = project.try_json(res / "quilt.mod.json")
+    if isinstance(meta, dict):
+        found = True
+        loader = meta.get("quilt_loader") if isinstance(meta.get("quilt_loader"), dict) else {}
+        for dep in loader.get("depends") or []:
+            dep_id = dep.get("id") if isinstance(dep, dict) else dep
+            if isinstance(dep_id, str):
+                mods.add(dep_id)
+    for toml in ("META-INF/neoforge.mods.toml", "META-INF/mods.toml"):
+        try:
+            text = (res / toml).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        found = True
+        for block in re.split(r"\[\[dependencies\.", text)[1:]:
+            m = re.search(r"""^\s*modId\s*=\s*["']([^"']+)["']""", block, re.MULTILINE)
+            if m:
+                mods.add(m.group(1))
+    return mods if found else None
+
+
 def _vanilla_tag_contains(project: Project, tag: str, entry_id: str) -> bool:
     """True if ``data/minecraft/tags/worldgen/structure/<tag>.json`` lists ``entry_id``."""
     tag_path = project.data_root / "minecraft" / "tags" / "worldgen" / "structure" / f"{tag}.json"
@@ -165,8 +209,27 @@ def _validate_options(rep: dict, rwhere: str, errors: list[str]) -> None:
             )
 
 
+def _validate_target(vs: str, rwhere: str, project: Project, vanilla: set[str],
+                     declared: set[str] | None, errors: list[str], warnings: list[str]) -> None:
+    """The structure a replacement stands in for: vanilla, this mod's own, or another mod's."""
+    ns = vs.partition(":")[0]
+    if ns == "minecraft":
+        if vs not in vanilla:
+            errors.append(f"  [ERROR] {rwhere}.vanilla_structure = {vs!r}: not a known vanilla structure")
+    elif ns == project.namespace:
+        if not _structure_exists(project, vs):
+            errors.append(f"  [ERROR] {rwhere}.vanilla_structure = {vs!r}: no worldgen/structure JSON found")
+    elif declared is not None and ns not in declared:
+        warnings.append(
+            f"  [WARN] {rwhere}.vanilla_structure = {vs!r}: another mod's structure, replaced only when "
+            f"that mod is installed, and no loader file names {ns!r} as a dependency (an optional one "
+            f"will do), so a misspelt id would go unnoticed"
+        )
+
+
 def _validate_presets(manifest: rv.ReplaceVanillaFile, project: Project, vanilla: set[str],
-                      errors: list[str]) -> None:
+                      errors: list[str], warnings: list[str]) -> None:
+    declared = _declared_mods(project)
     seen_ids: dict[str, int] = {}
     for pi, preset in enumerate(manifest.presets):
         where = f"presets[{pi}]"
@@ -211,8 +274,8 @@ def _validate_presets(manifest: rv.ReplaceVanillaFile, project: Project, vanilla
                 errors.append(f"  [ERROR] {rwhere}.vanilla_structure: missing (parser skips this replacement)")
             elif not _is_id(vs):
                 errors.append(f"  [ERROR] {rwhere}.vanilla_structure = {vs!r}: not a valid resource id")
-            elif vs not in vanilla:
-                errors.append(f"  [ERROR] {rwhere}.vanilla_structure = {vs!r}: not a known vanilla structure")
+            else:
+                _validate_target(vs, rwhere, project, vanilla, declared, errors, warnings)
 
             rs = rep.get("replacement_structure")
             if rs is None:
@@ -330,7 +393,7 @@ def run(ctx: ValidatorContext) -> tuple[bool, str]:
             "the file has no effect"
         )
 
-    _validate_presets(manifest, project, _vanilla_structures(svc), errors)
+    _validate_presets(manifest, project, _vanilla_structures(svc), errors, warnings)
     _validate_tag_hookups(manifest, project, warnings)
     _validate_structures_block(manifest, project, errors, warnings)
 
